@@ -1,0 +1,10 @@
+{
+  "name": "pi-kit-goal",
+  "version": "0.1.0",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./extension/index.ts"
+    ]
+  }
+}

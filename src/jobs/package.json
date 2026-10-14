@@ -1,0 +1,20 @@
+{
+  "name": "pi-kit-jobs",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extension/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.0"
+  },
+  "scripts": {
+    "test": "bun test extension"
+  }
+}

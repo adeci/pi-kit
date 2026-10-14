@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="752" viewBox="0 0 880 752" role="img" aria-labelledby="title description">
+  <title id="title">Pi with Agents, Jobs and Events</title>
+  <desc id="description">Pi delegates work to child agents, which return reports directly for review. Pi and its agents submit long-running commands to Jobs, backed by Pueue. Jobs, local scripts and service hooks publish Events. Topic broadcasts fan out to matching live subscribers: this Pi session, other Pi sessions and terminal monitors. Named sends target one Pi attachment. Publishers contact subscriber sockets directly; Events is not a broker. Agents stop with Pi. Jobs can continue after Pi exits, but live watches end. There is no automatic shell capture, offline queue or replay.</desc>
+  <defs>
+    <marker id="request" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#2563eb"/>
+    </marker>
+    <marker id="response" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#047857"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #17243b; }
+      .heading { font-size: 22px; font-weight: 700; }
+      .detail { font-size: 14px; fill: #475569; }
+      .label { font-size: 14px; fill: #1d4ed8; }
+      .reply-label { font-size: 14px; fill: #047857; }
+      .request { fill: none; stroke: #2563eb; stroke-width: 2; marker-end: url(#request); }
+      .response { fill: none; stroke: #047857; stroke-width: 2; marker-end: url(#response); }
+    </style>
+  </defs>
+  <rect width="880" height="752" rx="16" fill="#f8fafc"/>
+
+  <rect x="24" y="24" width="300" height="150" rx="14" fill="#eef2ff" stroke="#a5b4fc"/>
+  <text x="48" y="61" class="heading">Your Pi session</text>
+  <text x="48" y="88" class="detail">Stock Pi + pi-kit extensions</text>
+  <text x="48" y="120" class="detail">Assign work and review results.</text>
+  <text x="48" y="144" class="detail">Continue the conversation while it runs.</text>
+
+  <rect x="548" y="24" width="308" height="150" rx="14" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="572" y="61" class="heading">Agents</text>
+  <text x="572" y="88" class="detail">Child Pi sessions work in parallel.</text>
+  <text x="572" y="112" class="detail">Reports and changes return for review.</text>
+  <text x="572" y="150" class="detail">Stop when their parent Pi exits.</text>
+
+  <rect x="548" y="302" width="308" height="150" rx="14" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="572" y="339" class="heading">Jobs</text>
+  <text x="572" y="366" class="detail">Pueue runs long commands.</text>
+  <text x="572" y="390" class="detail">Status and logs stay available.</text>
+  <text x="572" y="428" class="detail">Can continue after Pi exits.</text>
+
+  <rect x="24" y="302" width="300" height="150" rx="14" fill="#fff" stroke="#cbd5e1"/>
+  <text x="48" y="339" class="heading">Events</text>
+  <text x="48" y="366" class="detail">Named sends or topic-based pub/sub.</text>
+  <text x="48" y="390" class="detail">Direct sockets, not a broker.</text>
+  <text x="48" y="428" class="detail">No offline queue or replay.</text>
+
+  <rect x="24" y="574" width="300" height="150" rx="14" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="48" y="611" class="heading">External publishers</text>
+  <text x="48" y="638" class="detail">Local scripts, watchers and services.</text>
+  <text x="48" y="662" class="detail">Opt-in build and job hooks.</text>
+  <text x="48" y="700" class="detail">Explicit CLI calls, no shell capture.</text>
+
+  <rect x="548" y="574" width="308" height="150" rx="14" fill="#eef2ff" stroke="#a5b4fc"/>
+  <text x="572" y="611" class="heading">Other subscribers</text>
+  <text x="572" y="638" class="detail">Pi sessions in other terminals.</text>
+  <text x="572" y="662" class="detail">CLI monitors and custom handlers.</text>
+  <text x="572" y="700" class="detail">Each matching subscriber gets a copy.</text>
+
+  <path d="M324 76 H548" class="request"/>
+  <text x="436" y="64" text-anchor="middle" class="label">assign work</text>
+  <path d="M548 126 H324" class="response"/>
+  <text x="436" y="114" text-anchor="middle" class="reply-label">return reports</text>
+
+  <path d="M702 174 V302" class="request"/>
+  <text x="718" y="231" class="label">submit</text>
+  <text x="718" y="250" class="label">commands</text>
+  <path d="M324 158 H426 V326 H548" class="request"/>
+  <text x="436" y="282" class="label">submit</text>
+  <text x="436" y="301" class="label">commands</text>
+
+  <path d="M548 390 H324" class="response" stroke-dasharray="6 5"/>
+  <text x="436" y="378" text-anchor="middle" class="reply-label">job updates</text>
+  <path d="M174 302 V174" class="response" stroke-dasharray="6 5"/>
+  <text x="190" y="231" class="reply-label">matching topics or named sends</text>
+  <text x="190" y="250" class="detail">follow-up or notification</text>
+
+  <path d="M174 574 V452" class="response" stroke-dasharray="6 5"/>
+  <text x="190" y="510" class="reply-label">publish a topic</text>
+  <text x="190" y="529" class="detail">or send to one Pi by name</text>
+
+  <path d="M324 418 H426 V646 H548" class="response" stroke-dasharray="6 5"/>
+  <text x="442" y="510" class="reply-label">fan out</text>
+  <text x="442" y="529" class="detail">to live topic subscribers</text>
+</svg>

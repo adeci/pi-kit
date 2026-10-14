@@ -1,0 +1,3 @@
+export const MAX_PENDING_RPC_REQUESTS = 64;
+export const MAX_RPC_LINE_BYTES = 4 * 1024 * 1024;
+export const RPC_REQUEST_TIMEOUT_MS = 15000;

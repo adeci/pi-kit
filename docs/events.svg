@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640" role="img" aria-labelledby="title description">
+  <title id="title">Events: named sessions and live delivery</title>
+  <desc id="description">Terminal commands, local services, peer Pi sessions and Jobs watchers publish directly to subscriber sockets. Friendly names resolve through a persistent local registry to a session UUID and then a live attachment. Each subscriber dispatches matching topics to a handler, a display notification or a model follow-up. There is no central broker or offline event queue. Agent assignment and result control remains a separate RPC path.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#2563eb"/></marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #17243b; }
+      .heading { font-size: 21px; font-weight: 700; }
+      .detail { font-size: 14px; fill: #475569; }
+      .label { font-size: 14px; fill: #1d4ed8; }
+      .flow { fill: none; stroke: #2563eb; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="960" height="640" rx="16" fill="#f8fafc"/>
+  <text x="28" y="40" class="heading">Events — direct, local delivery</text>
+  <text x="28" y="64" class="detail">Same-user publishers and subscribers. No central broker.</text>
+
+  <rect x="28" y="92" width="264" height="180" rx="14" fill="#eef2ff" stroke="#a5b4fc"/>
+  <text x="48" y="124" class="heading">Publishers</text>
+  <text x="48" y="152" class="detail">Terminal commands and local services</text>
+  <text x="48" y="176" class="detail">Peer Pi sessions</text>
+  <text x="48" y="200" class="detail">Jobs watcher, after querying Pueue</text>
+  <text x="48" y="242" class="label">send NAME · publish --topic TOPIC</text>
+
+  <rect x="360" y="92" width="572" height="180" rx="14" fill="#fff" stroke="#cbd5e1"/>
+  <text x="382" y="124" class="heading">Resolve an address</text>
+  <text x="382" y="154" class="detail">names.json: albacore → saved-session UUID</text>
+  <text x="382" y="182" class="detail">Runtime record: UUID → socket + attachment capability</text>
+  <text x="382" y="216" class="detail">Names persist. Sockets and pending notifications do not.</text>
+  <text x="382" y="244" class="detail">send binds one attachment before reading stdin.</text>
+  <path d="M292 174 H360" class="flow"/>
+
+  <path d="M646 272 V322" class="flow"/>
+  <text x="664" y="303" class="label">direct Unix-socket frame</text>
+  <rect x="360" y="322" width="572" height="156" rx="14" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="382" y="356" class="heading">Subscriber: albacore</text>
+  <text x="382" y="384" class="detail">Validate capability, attachment and subscribed topic.</text>
+  <text x="382" y="414" class="detail">Dispatch to a handler, a UI notification or a follow-up.</text>
+  <text x="382" y="448" class="detail">Idle Pi can wake. Busy follow-ups wait for a safe boundary.</text>
+  <text x="382" y="468" class="detail">Acknowledgment means accepted, not processed by the model.</text>
+
+  <rect x="28" y="322" width="264" height="156" rx="14" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="48" y="356" class="heading">Other subscribers</text>
+  <text x="48" y="386" class="detail">Other Pi sessions or CLI listeners</text>
+  <text x="48" y="414" class="detail">Explicit broadcast sends each</text>
+  <text x="48" y="438" class="detail">matching subscriber its own copy.</text>
+  <path d="M160 272 V322" class="flow"/>
+
+  <text x="28" y="532" class="heading">No mailbox, replay or implicit orchestration</text>
+  <text x="28" y="560" class="detail">Offline or ambiguous named targets fail. No automatic retry against replacement attachments.</text>
+  <text x="28" y="586" class="detail">Parent/child agent assignments and authoritative results stay on their separate RPC/supervisor path.</text>
+  <text x="28" y="612" class="detail">External text is data, not approval. Names and source labels do not authenticate publishers.</text>
+</svg>

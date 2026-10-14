@@ -1,0 +1,17 @@
+{
+  "name": "pi-kit-todos",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.0.0",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./extension/index.ts"
+    ]
+  }
+}

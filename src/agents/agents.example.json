@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "maxConcurrency": 32,
+  "maxDepth": 2,
+  "idleTtlMs": 420000,
+  "roles": {
+    "task": { "model": "provider/model-id" },
+    "scout": { "model": "provider/model-id" },
+    "reviewer": { "model": "provider/model-id" },
+    "sonic": { "model": "provider/model-id" }
+  }
+}

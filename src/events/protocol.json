@@ -1,0 +1,127 @@
+{
+  "limits": {
+    "frameBytes": 16384,
+    "eventBytes": 15360,
+    "topics": 64,
+    "duplicates": 256
+  },
+  "event": {
+    "version": 1,
+    "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "topic": "agent.result",
+    "source": "worker",
+    "payload": { "text": "done" }
+  },
+  "events": [
+    { "name": "base", "changes": {}, "valid": true },
+    { "name": "null payload", "changes": { "payload": null }, "valid": true },
+    { "name": "numeric version", "changes": { "version": 1.0 }, "valid": true },
+    {
+      "name": "boolean version",
+      "changes": { "version": true },
+      "valid": false
+    },
+    { "name": "future version", "changes": { "version": 2 }, "valid": false },
+    { "name": "missing payload", "remove": ["payload"], "valid": false },
+    { "name": "numeric ID", "changes": { "id": 123 }, "valid": false },
+    {
+      "name": "nonhex ID",
+      "changes": { "id": "gggggggggggggggggggggggggggggggg" },
+      "valid": false
+    },
+    {
+      "name": "uppercase ID",
+      "changes": { "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+      "valid": false
+    },
+    {
+      "name": "ID trailing newline",
+      "changes": { "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" },
+      "valid": false
+    },
+    {
+      "name": "topic trailing newline",
+      "changes": { "topic": "agent.result\n" },
+      "valid": false
+    },
+    {
+      "name": "source trailing newline",
+      "changes": { "source": "worker\n" },
+      "valid": false
+    },
+    {
+      "name": "wildcard event topic",
+      "changes": { "topic": "agent.*" },
+      "valid": false
+    },
+    { "name": "numeric source", "changes": { "source": 3 }, "valid": false },
+    {
+      "name": "nonfinite number",
+      "changes": {},
+      "rawPayload": "1e400",
+      "valid": false
+    },
+    {
+      "name": "safe integer boundary",
+      "changes": {},
+      "rawPayload": "9007199254740991",
+      "valid": true
+    },
+    {
+      "name": "unsafe integer",
+      "changes": {},
+      "rawPayload": "9007199254740993",
+      "valid": false
+    },
+    {
+      "name": "lone surrogate",
+      "changes": {},
+      "rawPayload": "\"\\ud800\"",
+      "valid": false
+    }
+  ],
+  "sizes": [
+    { "character": "x", "count": 15000, "valid": true },
+    { "character": "x", "count": 16000, "valid": false },
+    { "character": "界", "count": 4000, "valid": true },
+    { "character": "界", "count": 6000, "valid": false },
+    { "character": "\u0000", "count": 3000, "valid": false }
+  ],
+  "patterns": [
+    { "pattern": "job.*", "topic": "job.completed", "matches": true },
+    { "pattern": "job.*", "topic": "jobs.completed", "matches": false },
+    { "pattern": "job.*", "topic": "Job.completed", "matches": false },
+    { "pattern": "agent.result", "topic": "agent.question", "matches": false },
+    { "pattern": "agent.result", "topic": "agent.result", "matches": true }
+  ],
+  "frames": [
+    { "name": "valid", "changes": {}, "valid": true },
+    {
+      "name": "boolean version",
+      "changes": { "version": true },
+      "valid": false
+    },
+    {
+      "name": "wrong subscription",
+      "changes": { "subscription": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "valid": false
+    },
+    {
+      "name": "wrong token",
+      "changes": { "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "valid": false
+    },
+    { "name": "numeric token", "changes": { "token": 123 }, "valid": false },
+    { "name": "missing event", "remove": ["event"], "valid": false }
+  ],
+  "duplicates": [
+    { "first": { "a": 1, "b": 2 }, "second": { "b": 2, "a": 1 }, "same": true },
+    { "first": { "a": 1 }, "second": { "a": 1.0 }, "same": true },
+    { "first": { "a": 1 }, "second": { "a": true }, "same": false },
+    {
+      "first": { "text": "done" },
+      "second": { "text": "changed" },
+      "same": false
+    }
+  ]
+}
