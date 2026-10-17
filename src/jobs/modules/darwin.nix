@@ -16,6 +16,14 @@ let
         mkdir -p "$XDG_RUNTIME_DIR"
         chmod 700 "$XDG_RUNTIME_DIR"
         ${cli} init --callbacks --shell bash
+        # The callback readiness record expires whenever the daemon socket
+        # changes; verify it once the new daemon is listening.
+        (
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 1
+            ${cli} doctor >/dev/null 2>&1 && exit 0
+          done
+        ) &
         exec ${lib.getExe' pkgs.pueue "pueued"} --config "$(${cli} config-path)"
       '';
 in

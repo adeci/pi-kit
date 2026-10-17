@@ -13,6 +13,17 @@ let
       ''
         exec ${lib.getExe' pkgs.pueue "pueued"} --config "$(${cli} config-path)"
       '';
+  # The callback readiness record expires whenever the daemon socket changes,
+  # so verify it after every daemon start instead of leaving `doctor` to users.
+  verify =
+    pkgs.writeShellScript "pi-jobs-verify" # bash
+      ''
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+          ${cli} doctor && exit 0
+          sleep 1
+        done
+        exec ${cli} doctor
+      '';
 in
 {
   options.services.pi-jobs = {
@@ -54,6 +65,22 @@ in
         RestartSec = "2s";
         TimeoutStartSec = "15s";
         TimeoutStopSec = "10s";
+        UMask = "0077";
+      };
+    };
+    # A separate unit keeps the daemon's own start (and Pueue's scheduling)
+    # independent of verification: a failed check leaves the daemon running and
+    # the jobs extension reports it as not ready.
+    systemd.user.services.pi-jobs-doctor = lib.mkIf cfg.enable {
+      description = "Verify the Pi jobs completion callback after Pueue starts";
+      wantedBy = [ "pi-jobs-pueue.service" ];
+      after = [ "pi-jobs-pueue.service" ];
+      bindsTo = [ "pi-jobs-pueue.service" ];
+      unitConfig.ConditionUser = "!root";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = verify;
+        TimeoutStartSec = "90s";
         UMask = "0077";
       };
     };

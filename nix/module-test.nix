@@ -40,6 +40,7 @@ let
   noDaemon = evaluate components false;
   off = evaluate [ ] false;
   service = enabled.systemd.user.services.pi-jobs-pueue;
+  doctor = enabled.systemd.user.services.pi-jobs-doctor;
   moduleNames = builtins.sort builtins.lessThan ([ "default" ] ++ components);
 in
 assert builtins.attrNames self.nixosModules == moduleNames;
@@ -84,6 +85,13 @@ assert service.serviceConfig.RuntimeDirectory == "pi-jobs/pueue";
 assert service.serviceConfig.RuntimeDirectoryMode == "0700";
 # Starting the service must not override Pueue's scheduling policy.
 assert !(service.serviceConfig ? ExecStartPost);
+# Every daemon start re-verifies the callback in a separate unit, so a failed
+# check never fails the daemon itself.
+assert doctor.wantedBy == [ "pi-jobs-pueue.service" ];
+assert doctor.bindsTo == [ "pi-jobs-pueue.service" ];
+assert doctor.after == [ "pi-jobs-pueue.service" ];
+assert doctor.serviceConfig.Type == "oneshot";
+assert !(noDaemon.systemd.user.services ? pi-jobs-doctor);
 pkgs.runCommand "pi-kit-module-check" { } ''
   export HOME="$TMPDIR/home"
   for directory in .agents/extensions .pi/agent/extensions; do

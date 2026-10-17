@@ -13,7 +13,7 @@ pi-jobs init --callbacks
 pueued --config "$(pi-jobs config-path)"
 ```
 
-Run the daemon in another terminal. Once it is running, use `pi-jobs doctor` before attaching watches. This explicit check submits a no-op with an empty environment, tests the running callback, and removes the finished probe. It does not restart Pueue or change scheduling settings. The readiness record is tied to the daemon socket and expires after a restart; it stores no watches or notifications. A missing publisher is reported separately and disables watch registration, not job execution.
+Run the daemon in another terminal. Once it is running, use `pi-jobs doctor` before attaching watches. This explicit check submits a no-op with an empty environment, tests the running callback, and removes the finished probe. It does not restart Pueue or change scheduling settings. The readiness record is tied to the daemon socket and expires after a restart; it stores no watches or notifications. The managed NixOS and nix-darwin services run this check automatically after every daemon start (on NixOS as the separate `pi-jobs-doctor.service`, so a failed check never fails the daemon); run it by hand only for a daemon you start yourself. A missing publisher is reported separately and disables watch registration, not job execution.
 
 `init` requires `XDG_RUNTIME_DIR` and Bash on `PATH`. For notifications, the daemon also needs `pi-jobs` and `pi-events` on `PATH`. Configure the hook before starting Pueue; changing its file does not activate it in an already-running daemon. Do not restart Pueue while relying on active jobs surviving. `init --callbacks` never overwrites a custom callback. A custom or chained hook can be used if it invokes the same numeric-ID helper and passes `doctor`.
 
