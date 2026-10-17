@@ -75,6 +75,29 @@ test("OMP-style defaults and exact role resolution without fallback", async () =
   expect(() => resolveModel({ task: "x" }, config.roles.scout, [])).toThrow(
     "not configured",
   );
+  // Unconfigured roles inherit the caller's model; it must still be available.
+  expect(
+    resolveModel(
+      { task: "x" },
+      config.roles.scout,
+      [{ provider: "fixture", id: "exact" }],
+      "fixture/exact",
+    ),
+  ).toBe("fixture/exact");
+  expect(
+    resolveModel(
+      { task: "x" },
+      config.roles.task,
+      [
+        { provider: "fixture", id: "exact" },
+        { provider: "fixture", id: "parent" },
+      ],
+      "fixture/parent",
+    ),
+  ).toBe("fixture/exact");
+  expect(() =>
+    resolveModel({ task: "x" }, config.roles.scout, [], "fixture/gone"),
+  ).toThrow("no fallback");
   expect(() => narrow(["write"], ["read"], "tools")).toThrow("role maximum");
 });
 test("invalid concurrency and malformed role settings fail clearly", async () => {

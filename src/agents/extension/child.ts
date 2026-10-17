@@ -104,11 +104,25 @@ export default function child(pi: ExtensionAPI) {
     const loadedPaths = await Promise.all(
       loaded.map((command) => realpath(command.sourceInfo.path)),
     );
-    if (
-      loadedPaths.length !== expectedPaths.length ||
-      expectedPaths.some((path) => !loadedPaths.includes(path))
-    )
-      throw new Error("Child loaded skills outside the selected role snapshot");
+    // Workers inherit the parent's skills; role skills are additions that
+    // must actually have loaded. Pi keeps the first skill of a given name, so
+    // an inherited copy of the same skill also satisfies the role.
+    const loadedNames = new Set(
+      loaded.map((command) => command.name.replace(/^skill:/, "")),
+    );
+    const missingSkills: string[] = [];
+    for (const path of expectedPaths) {
+      if (loadedPaths.includes(path)) continue;
+      const name =
+        /^---\r?\n[\s\S]*?^name:\s*["']?([^"'\r\n]+?)["']?\s*$/m.exec(
+          await readFile(path, "utf8"),
+        )?.[1];
+      if (!name || !loadedNames.has(name)) missingSkills.push(path);
+    }
+    if (missingSkills.length)
+      throw new Error(
+        `Selected role skills did not load: ${missingSkills.join(", ")}`,
+      );
     const selected = [...config.tools, ...controlTools, "agent_yield"];
     const all = new Set(pi.getAllTools().map((tool) => tool.name));
     const missing = selected.filter((name) => !all.has(name));

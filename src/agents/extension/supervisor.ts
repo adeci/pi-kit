@@ -21,6 +21,7 @@ import { listen } from "./control";
 import { RpcTransport } from "./rpc";
 import { ProcessGroupOwner } from "./process-owner";
 import { snapshotSkills } from "./skills";
+import { childResourceArgs, parentResources } from "./inherit";
 import {
   capturePatch,
   createWorkspace,
@@ -46,6 +47,10 @@ import {
 
 const root = "main";
 const here = dirname(realpathSync(fileURLToPath(import.meta.url)));
+// Captured at load so relative -e/--skill paths resolve against the parent's
+// launch directory, not a worker's cwd.
+const launchCwd = process.cwd();
+const launchResources = parentResources(process.argv, launchCwd);
 interface Runtime {
   token: string;
   rpc?: RpcTransport;
@@ -446,10 +451,16 @@ export class Supervisor {
     const roleName = input.role ?? "task",
       role = this.config.roles[roleName];
     if (!role) throw new Error(`Unknown agent role ${roleName}`);
+    const callerModel =
+      parent?.model ??
+      (this.ctx.model
+        ? `${this.ctx.model.provider}/${this.ctx.model.id}`
+        : undefined);
     const model = resolveModel(
       input,
       role,
       this.ctx.modelRegistry.getAvailable(),
+      callerModel,
     );
     const tools = narrow(input.tools, role.tools, "tools"),
       skills = narrow(input.skills, role.skills, "skills");
@@ -718,12 +729,15 @@ export class Supervisor {
       const args = [
         "--mode",
         "rpc",
-        "--no-extensions",
-        "--extension",
-        join(here, "child.ts"),
-        ...agent.role.extensions.flatMap((p) => ["--extension", p]),
-        "--no-skills",
-        ...agent.skillSnapshots.flatMap((p) => ["--skill", p]),
+        ...childResourceArgs(
+          launchResources,
+          {
+            extension: join(here, "child.ts"),
+            extensions: agent.role.extensions,
+            skills: agent.skillSnapshots,
+          },
+          launchCwd,
+        ),
         "--no-prompt-templates",
         "--no-themes",
         "--no-approve",

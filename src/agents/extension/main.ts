@@ -9,6 +9,9 @@ import { completionRenderer } from "../../shared/completion-renderer";
 import { agentResultObserved, agentResultDescription } from "./notifications";
 
 export default function agents(pi: ExtensionAPI) {
+  // Workers inherit the parent's extensions, including this one. Their agent
+  // tools come from child.ts and route to the owning supervisor instead.
+  if (process.argv.includes("--pi-agents-child")) return;
   let claimed = false;
   pi.events.emit("pi-kit:claim:agents", () => {
     claimed = true;

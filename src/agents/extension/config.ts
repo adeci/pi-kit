@@ -206,11 +206,13 @@ export function resolveModel(
   input: SpawnInput,
   role: Role,
   available: { provider: string; id: string }[],
+  inherited?: string,
 ): string {
-  const exact = input.model ?? role.model;
+  // An unconfigured role inherits the delegating agent's model.
+  const exact = input.model ?? role.model ?? inherited;
   if (!exact)
     throw new Error(
-      "Role model is not configured. Select its Model in /agents Settings or pass an exact model override.",
+      "Role model is not configured and the caller has no model to inherit. Select its Model in /agents Settings or pass an exact model override.",
     );
   if (!available.some((m) => `${m.provider}/${m.id}` === exact))
     throw new Error(
