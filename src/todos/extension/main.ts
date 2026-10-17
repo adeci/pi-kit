@@ -161,7 +161,7 @@ export default function todos(pi: ExtensionAPI) {
   });
   pi.on("before_agent_start", (event) => {
     event.systemPromptOptions.sections.pi_todos =
-      "Use todo for multi-step work worth tracking, not trivial answers. Use explicit transitions; mark done only after verifying the work. Agent/job completion does not complete a todo. Multiple tasks may be in_progress for parallel work. Do not replace an existing plan without a reason.\nCurrent branch todos:\n" +
+      "Use todo for multi-step work worth tracking, not trivial answers. Use explicit transitions; mark done only after verifying the work. Agent/job completion does not complete a todo. Multiple tasks may be in_progress for parallel work. Do not replace an existing plan without a reason. Before reporting work complete, reconcile the list: mark verified tasks done, and drop or block the rest with a reason.\nCurrent branch todos:\n" +
       describe(phases);
   });
   const string = Type.String({ minLength: 1, maxLength: 1000 });
