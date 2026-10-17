@@ -10,9 +10,12 @@ Options have stable IDs, labels, and optional descriptions. `multi` enables
 multiple selections; `recommended` names an option ID without selecting it.
 Omit options for a free-text question. Every question permits a custom answer.
 
-In the terminal, use arrows to navigate, Space to toggle choices, Enter to
-advance, and left/right or Tab to revisit questions. The final review requires
-explicit submission. Text answers use Enter to save and Shift-Enter for a newline.
+In the terminal, the form opens as a compact card above the editor, sized to
+its content (up to 70% of the terminal). The cursor starts on the recommended
+option without selecting it. Use arrows to navigate, Space to toggle choices,
+Enter to advance, and left/right or Tab to revisit questions. A single question
+submits when answered; forms with several questions end in a review that
+requires explicit submission. Text answers use Enter to save and Shift-Enter for a newline.
 Page Up/Down scroll long forms. Escape leaves the text editor or cancels the form.
 
 Results retain the questions and submitted answers in the transcript. Cancellation

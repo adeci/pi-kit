@@ -163,9 +163,9 @@ def tui(scenario, mode="regular"):
                     assert goals[-1]["goal"]["status"] == "paused", goals[-1]
             else:
                 key(b" ")
-                wait(lambda: "[x] Unit tests" in text())
+                wait(lambda: "☑ Unit tests" in text())
                 key(b"\x1b[B ")
-                wait(lambda: "[x] Integration tests" in text())
+                wait(lambda: "☑ Integration tests" in text())
                 # Narrow resize exercises the shared frame and wrapped labels.
                 fcntl.ioctl(
                     master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 70, 0, 0)
