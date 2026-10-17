@@ -133,6 +133,11 @@ class Pi:
             self.process.stdin.close()
 
 
+def observed(trace):
+    """Observer CLI calls, excluding the extension's read-only health probes."""
+    return [line for line in trace.read_text().splitlines() if line != "health"]
+
+
 def main():
     assert PI, "Pi must be installed, or set PI_BINARY"
     with tempfile.TemporaryDirectory(prefix="pk-", dir="/tmp") as temporary:
@@ -175,6 +180,15 @@ def main():
         subprocess.run(
             [CLI, "init", "--callbacks"], env=env, check=True, capture_output=True
         )
+        # A reboot clears the tmpfs runtime directory but keeps the config.
+        # init must recreate it, or pueued cannot create its pid file.
+        shutil.rmtree(root / "run/pi-jobs")
+        subprocess.run(
+            [CLI, "init", "--callbacks"], env=env, check=True, capture_output=True
+        )
+        runtime = root / "run/pi-jobs/pueue"
+        assert runtime.is_dir(), "init did not recreate the runtime directory"
+        assert runtime.stat().st_mode & 0o777 == 0o700
         with (
             open(root / "daemon.log", "w+") as daemon_log,
             open(root / "pi.stderr", "a+") as pi_log,
@@ -230,7 +244,7 @@ def main():
                 ]
                 if trace:
                     time.sleep(1.3)
-                    assert len(trace.read_text().splitlines()) == 1, trace.read_text()
+                    assert len(observed(trace)) == 1, trace.read_text()
                 pi.receive(lambda event: event.get("type") == "agent_end")
                 notices = pi.notices()
                 assert len(notices) == 1 and first in notices[0]["content"], notices
@@ -385,11 +399,11 @@ def main():
                 # Only an explicit check-in adds periodic status queries, and
                 # its progress event must not trigger a model turn.
                 handle = submit("sleep 12; echo checked-in\n", check_in=10)
-                calls = len(trace.read_text().splitlines()) if trace else None
+                calls = len(observed(trace)) if trace else None
                 time.sleep(10.5)
                 assert len(pi.notices()) == before
                 if trace:
-                    assert len(trace.read_text().splitlines()) == calls + 1
+                    assert len(observed(trace)) == calls + 1
                 pi.receive(lambda event: event.get("type") == "agent_end")
                 assert (
                     len(pi.notices()) == before + 1

@@ -44,6 +44,10 @@ in
         pkgs.coreutils
       ];
       serviceConfig = {
+        # $XDG_RUNTIME_DIR is tmpfs; recreate the daemon's directory on every
+        # start. `pi-jobs init` also repairs it for custom configs.
+        RuntimeDirectory = "pi-jobs/pueue";
+        RuntimeDirectoryMode = "0700";
         ExecStartPre = "${cli} init --callbacks --shell bash";
         ExecStart = daemon;
         Restart = "on-failure";

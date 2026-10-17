@@ -3,7 +3,7 @@ name: kit-jobs
 description: Submit long-running commands to Pueue without blocking the conversation or stopping them when Pi exits.
 ---
 
-Use ordinary Bash for short commands. For long jobs, send command text on stdin to `pi-jobs run --detach --name NAME`. Keep the returned `ID:INCARNATION` handle.
+Run anything that can take more than about 30 seconds as a job: builds (`nix build`, cargo, npm), test suites, NixOS/Darwin toplevel evaluations, downloads and deploys. Send command text on stdin to `pi-jobs run --detach --name NAME`, keep the returned `ID:INCARNATION` handle and continue working. Use ordinary Bash only for quick reads and short commands; the jobs extension refuses known long commands in foreground Bash and caps foreground calls without an explicit timeout at 120 seconds. If you need the result before continuing, still submit, then wait in short slices (`pi-jobs wait HANDLE --timeout 30`). If Pueue is unavailable, tell the user and stop; never fall back to a long foreground command.
 
 Use `pi-jobs status HANDLE`, `log HANDLE`, `wait HANDLE --timeout SECONDS`, or `stop HANDLE`. Use `forget HANDLE` only to delete an owned finished job and its retained data; it refuses active jobs. A wait timeout is a successful detach, not an execution deadline. Never resubmit a job because waiting or notification delivery ended.
 

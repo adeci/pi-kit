@@ -19,6 +19,35 @@ test("loaded jobs extension supplies guidance even when skills are disabled", ()
   expect(sections.original).toBe("Original guidelines");
   expect(sections.pi_jobs).toBe(jobGuidance);
   expect(sections.pi_jobs).toContain("10-604800");
+  // The guidance defines long-running work concretely instead of opting in.
+  expect(jobGuidance).toContain("builds");
+  expect(jobGuidance).toContain("never fall back to a long foreground command");
+});
+
+test("foreground bash is guarded through tool_call", async () => {
+  const handlers = new Map<string, Function>();
+  jobs({
+    events: {
+      emit() {},
+      on() {
+        return () => {};
+      },
+    },
+    on: (name: string, handler: Function) => handlers.set(name, handler),
+    registerCommand() {},
+  } as any);
+  const toolCall = handlers.get("tool_call")!;
+  const quick = { toolName: "bash", input: { command: "ls" } as any };
+  expect(await toolCall(quick)).toBeUndefined();
+  expect(quick.input.timeout).toBe(120);
+  const long = await toolCall({
+    toolName: "bash",
+    input: { command: "nix build .#x" },
+  });
+  expect(long.block).toBe(true);
+  expect(
+    await toolCall({ toolName: "read", input: { path: "x" } }),
+  ).toBeUndefined();
 });
 
 test("check-ins are explicitly bounded", () => {

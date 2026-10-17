@@ -667,6 +667,28 @@ fn init(parser: &mut Parser) -> Result<i32, Error> {
     }
     let path = config_path()?;
     if path.exists() {
+        // Runtime directories live on tmpfs (/run/user/$UID, /tmp on Darwin)
+        // and disappear on reboot or logout while the config persists.
+        // Recreate them on every init or pueued cannot write its pid file.
+        // Only directories the config names explicitly (as pi-jobs's own config
+        // does) are managed; Pueue's defaults are left to Pueue.
+        let (settings, _) = Settings::read(&Some(path.clone()))?;
+        let mut dirs = Vec::new();
+        if settings.shared.runtime_directory.is_some() {
+            dirs.push(settings.shared.runtime_directory());
+        }
+        if settings.shared.unix_socket_path.is_some() {
+            if let Some(parent) = settings.shared.unix_socket_path()?.parent() {
+                dirs.push(parent.to_path_buf());
+            }
+        }
+        for dir in &dirs {
+            if !dir.exists() {
+                fs::create_dir_all(dir)?;
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+            }
+        }
         if callbacks {
             install_callback(&path)?;
         }

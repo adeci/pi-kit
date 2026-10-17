@@ -79,6 +79,9 @@ assert !(enabled.systemd.services ? pi-jobs-pueue);
 assert service.wantedBy == [ "default.target" ];
 assert service.unitConfig.ConditionUser == "!root";
 assert service.serviceConfig.UMask == "0077";
+# The runtime directory is tmpfs and must be recreated on every start.
+assert service.serviceConfig.RuntimeDirectory == "pi-jobs/pueue";
+assert service.serviceConfig.RuntimeDirectoryMode == "0700";
 # Starting the service must not override Pueue's scheduling policy.
 assert !(service.serviceConfig ? ExecStartPost);
 pkgs.runCommand "pi-kit-module-check" { } ''
