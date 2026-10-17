@@ -10,8 +10,10 @@ Enable `pi-kit.usage.enable = true`. Package: `pi-kit-usage`; discovery:
 provider you want to query. No other pi-kit component is required.
 
 The centered panel gives each provider the full width. OMP-style solid/hatched
-bars show used quota; labels show both the percentage remaining and used. Labels
-stack around the wide bars on narrow terminals. Credit balances retain their
+bars show used quota; labels show both the percentage remaining and used. All
+providers share label, bar, percentage and reset columns. On narrow terminals,
+every meter switches together to a stacked layout with equally wide bars. Long
+labels are truncated to preserve those columns. Credit balances retain their
 reported units and are rounded to two decimal places for display. No activity
 history is collected.
 
@@ -36,3 +38,13 @@ accounts, redeem resets, change subscriptions, or block model requests.
 Provider parsing and quota-bar layout are adapted from OMP v18.9.0; see
 [NOTICE](NOTICE). Offline tests cover parsing, rendering and failure handling. Live quota availability depends on provider
 access and is not established by those tests.
+
+Run the real-SDK layout regression checks without credentials or a session:
+
+```sh
+PI_CODING_AGENT_DIR=$(mktemp -d) pi --offline --no-extensions --no-skills \
+  --no-prompt-templates --no-context-files --no-session \
+  -e ./src/usage/tests/rendering.ts -p </dev/null
+```
+
+Run this from the repository root. The fixture exits before starting a session.

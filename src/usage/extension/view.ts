@@ -8,12 +8,48 @@ import { clean, resetText, type Card } from "./state";
 
 const names = { "openai-codex": "OpenAI Codex", anthropic: "Anthropic Claude" };
 
+const meterLabel = (label: string) =>
+  clean(label)
+    .replace(/^(\d+)h\b/, "$1 hours")
+    .replace(/^(\d+)d\b/, "$1 days");
+const meterReset = (reset: number | undefined, now: number) =>
+  reset === undefined
+    ? "reset ?"
+    : resetText(reset, now)
+        .replace(/^resets in /, "")
+        .replace(/\s+(?=\d)/g, "");
+const pad = (text: string, width: number) => {
+  const shown = truncateToWidth(text, width);
+  return shown + " ".repeat(Math.max(0, width - visibleWidth(shown)));
+};
+
+function meterLayout(cards: Card[], width: number, now: number) {
+  const meters = cards
+    .filter((card) => !card.hidden)
+    .flatMap((card) =>
+      (card.report?.meters ?? []).filter((meter) => !meter.detail),
+    );
+  const label = Math.min(
+    24,
+    Math.max(0, ...meters.map((m) => visibleWidth(meterLabel(m.label)))),
+  );
+  const reset = Math.max(
+    0,
+    ...meters.map((m) => visibleWidth(`⟲ ${meterReset(m.reset, now)}`)),
+  );
+  // Three-digit percentage fields keep 0/99/100 transitions in the same columns.
+  const percentages = visibleWidth("100% remaining · 100% used");
+  const bar = width - 2 - label - 1 - 1 - percentages - 1 - reset;
+  return { label, reset, percentages, bar, inline: bar >= 24 };
+}
+
 /** OMP's used-fraction bars and free percentage, with explicit used/remaining labels. */
 export function cardLines(
   card: Card,
   theme: Theme,
   width: number,
   now = Date.now(),
+  layout = meterLayout([card], width, now),
 ): string[] {
   if (card.hidden) return [];
   const fg = (color: Parameters<Theme["fg"]>[0], text: string) =>
@@ -37,9 +73,7 @@ export function cardLines(
   if (card.notice)
     lines.push(...wrapTextWithAnsi(fg("warning", clean(card.notice)), width));
   for (const meter of card.report?.meters ?? []) {
-    const label = clean(meter.label)
-      .replace(/^(\d+)h\b/, "$1 hours")
-      .replace(/^(\d+)d\b/, "$1 days");
+    const label = meterLabel(meter.label);
     if (meter.detail) {
       const n = Number(meter.detail);
       const detail =
@@ -63,17 +97,11 @@ export function cardLines(
     const percentages =
       used === undefined
         ? fg("dim", "usage not reported")
-        : fg(tone, `${100 - Math.round(used)}% remaining`) +
-          fg("dim", ` · ${Math.round(used)}% used`);
-    const reset =
-      meter.reset === undefined
-        ? "reset ?"
-        : resetText(meter.reset, now)
-            .replace(/^resets in /, "")
-            .replace(/\s+(?=\d)/g, "");
-    const suffix = ` ${percentages} ${fg("dim", `⟲ ${reset}`)}`;
-    const prefix = `  ${fg("muted", label)} `;
-    const cells = width - visibleWidth(prefix) - visibleWidth(suffix);
+        : fg(tone, `${String(100 - Math.round(used)).padStart(3)}% remaining`) +
+          fg("dim", ` · ${String(Math.round(used)).padStart(3)}% used`);
+    const reset = fg("dim", `⟲ ${meterReset(meter.reset, now)}`);
+    const suffix = ` ${pad(percentages, layout.percentages)} ${pad(reset, layout.reset)}`;
+    const prefix = `  ${fg("muted", pad(label, layout.label))} `;
     const bar = (size: number) => {
       if (used === undefined) return fg("dim", "·".repeat(size));
       const filled = Math.round((size * used) / 100);
@@ -81,17 +109,39 @@ export function cardLines(
         fg(tone, "█".repeat(filled)) + fg("dim", "░".repeat(size - filled))
       );
     };
-    if (cells >= 24) lines.push(prefix + bar(cells) + suffix);
+    if (layout.inline) lines.push(prefix + bar(layout.bar) + suffix);
     else {
-      // Stack labels rather than squeeze a wide meter into a tiny sparkline.
-      lines.push(
-        ...wrapTextWithAnsi(
-          `  ${fg("muted", label)} ${fg("dim", `⟲ ${reset}`)}`,
-          width,
-        ),
-      );
-      lines.push("  " + bar(Math.max(1, width - 2)));
-      lines.push(...wrapTextWithAnsi("  " + percentages, width));
+      // Every meter uses the same compact structure, never a per-row wrap decision.
+      const available = Math.max(1, width - 2);
+      const labelWidth = Math.max(1, available - layout.reset - 1);
+      if (available >= layout.reset + 5) {
+        lines.push(`  ${fg("muted", pad(label, labelWidth))} ${reset}`);
+      } else {
+        lines.push(`  ${fg("muted", truncateToWidth(label, available))}`);
+        lines.push(`  ${truncateToWidth(reset, available)}`);
+      }
+      lines.push("  " + bar(available));
+      if (available >= layout.percentages) {
+        lines.push("  " + percentages);
+      } else {
+        // Tiny terminals still get a fixed row count, including unknown usage.
+        lines.push(
+          "  " +
+            truncateToWidth(
+              used === undefined
+                ? percentages
+                : fg(tone, `${100 - Math.round(used)}% remaining`),
+              available,
+            ),
+          used === undefined
+            ? ""
+            : "  " +
+                truncateToWidth(
+                  fg("dim", `${Math.round(used)}% used`),
+                  available,
+                ),
+        );
+      }
     }
   }
   return lines.map((line) => truncateToWidth(line, width));
@@ -109,9 +159,10 @@ export function usageFrame(
 ) {
   const inner = Math.max(1, width - 4);
   const visible = cards.filter((card) => !card.hidden);
+  const layout = meterLayout(visible, inner, now);
   const body = visible.flatMap((card, i) => [
     ...(i ? [""] : []),
-    ...cardLines(card, theme, inner, now),
+    ...cardLines(card, theme, inner, now, layout),
   ]);
   if (!body.length)
     body.push(
