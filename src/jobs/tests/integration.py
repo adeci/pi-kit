@@ -267,6 +267,20 @@ def main():
                     check=True,
                 )
                 assert json.loads(result.stdout)[0]["exit_code"] == 0
+                # The events extension treats this stderr line in a bash result
+                # as a read receipt and drops the pending completion notice.
+                for command in (["log", second], ["wait", second, "--timeout", "1"]):
+                    read = subprocess.run(
+                        [CLI, *command],
+                        env=attached,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    assert "survived-pi-exit" in read.stdout, read
+                    assert (
+                        read.stderr.splitlines()[-1] == f"job={second} success exit=0"
+                    ), read
                 old = subprocess.run(
                     [EVENTS_CLI, "publish", "--topic", "agent.result"],
                     env=attached,
@@ -363,6 +377,14 @@ def main():
                         )
                     before = len(pi.notices())
                     handle = submit("sleep 30; echo should-not-complete\n")
+                    unfinished = subprocess.run(
+                        [CLI, "log", handle],
+                        env=fresh,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    assert "exit=" not in unfinished.stderr, unfinished
                     subprocess.run(
                         [CLI, "stop", handle],
                         env=fresh,

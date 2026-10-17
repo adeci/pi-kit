@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agentResultObserved } from "./notifications";
+import { agentResultDescription, agentResultObserved } from "./notifications";
 const result = {
   id: "agent",
   assignment: "agent:1",
@@ -66,4 +66,27 @@ test("wait, live status, errors, truncated content and rendering-only details do
       entry(result),
     ]),
   ).toBe(false);
+});
+test("result card: outcome glyph, agent name as title, summary preview", () => {
+  const card = agentResultDescription(
+    { ...result, name: "reviewer-1", role: "reviewer" },
+    `[Agent message/result]\n${JSON.stringify(result)}`,
+  );
+  expect(card).toMatchObject({
+    tone: "success",
+    glyph: "✓",
+    title: "reviewer-1",
+    preview: ["reviewed"],
+  });
+  expect(card.meta).toEqual(["completed", "reviewer", "agent"]);
+  expect(card.body).toBe(JSON.stringify(result));
+  expect(
+    agentResultDescription(
+      { ...result, report: { ...result.report, outcome: "blocked" } },
+      "",
+    ),
+  ).toMatchObject({ tone: "warning", glyph: "■" });
+  expect(
+    agentResultDescription({ from: "child", message: "question?" }, ""),
+  ).toMatchObject({ tone: "accent", preview: ["question?"] });
 });

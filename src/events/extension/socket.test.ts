@@ -3,6 +3,7 @@ import { expect, test, mock } from "bun:test";
 mock.module("@earendil-works/pi-tui", () => ({
   Text: class {},
   truncateToWidth: (text: string) => text,
+  wrapTextWithAnsi: (text: string) => [text],
 }));
 import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";

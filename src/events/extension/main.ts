@@ -30,7 +30,7 @@ import {
 
 import { completionDelivery } from "../../shared/completions";
 import { completionRenderer } from "../../shared/completion-renderer";
-import { jobResultObserved, eventDescription } from "./completions";
+import { eventDescription, jobNotice, jobResultObserved } from "./completions";
 
 type Mode = "display" | "followUp";
 type Handler = (event: Event, signal: AbortSignal) => Promise<void> | void;
@@ -262,7 +262,13 @@ export default function events(pi: ExtensionAPI) {
             typeof payload?.text === "string"
               ? payload.text
               : JSON.stringify(event.payload);
-          const content = `[external event: ${event.topic}; source: ${event.source}]\n${text.slice(0, 8192)}`;
+          // Finished jobs get a concise, noise-stripped tail; the full
+          // payload stays in details for the expanded view.
+          const body =
+            (event.topic === "job.completed" && event.source === "pi-jobs"
+              ? jobNotice(event.payload)
+              : undefined) ?? text;
+          const content = `[external event: ${event.topic}; source: ${event.source}]\n${body.slice(0, 8192)}`;
           if (mode === "display") {
             if (ctx.hasUI) ctx.ui.notify(content, "info");
             else process.stderr.write(`${content}\n`);

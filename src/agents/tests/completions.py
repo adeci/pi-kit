@@ -96,7 +96,15 @@ def run(mode, expected, job_read=False, abort=None):
             script = directory / "command.py"
             script.write_text(
                 "from pathlib import Path\nimport time\nPath('ready').touch()\ndeadline=time.monotonic()+15\nwhile not Path('release').exists():\n assert time.monotonic()<deadline\n time.sleep(.01)\n"
-                + f"print({(header + chr(10) + 'retained output' if job_read else 'wait interval elapsed')!r})\n"
+                + {
+                    False: "print('wait interval elapsed')\n",
+                    # pi-jobs status --tail HANDLE
+                    "status": f"print({header + chr(10) + 'retained output'!r})\n",
+                    # pi-jobs status HANDLE: the terminal header alone
+                    "status-only": f"print({header!r})\n",
+                    # pi-jobs wait/log: output, then the stderr receipt
+                    "wait": f"import sys\nprint('retained output')\nprint({'job=' + handle + ' success exit=0'!r}, file=sys.stderr)\n",
+                }[job_read]
             )
             env["PI_COMPLETION_JOB_COMMAND"] = "python3 " + shlex.quote(str(script))
         pi = integration.Pi(env, directory, directory, extensions=[EVENTS])
@@ -249,12 +257,7 @@ def tui(mode):
         try:
             wait(lambda: any(row["type"] == "start" for row in records(directory)))
             os.write(master, b"\x1b[200~COMPLETION wait\x1b[201~\r")
-            wait(
-                lambda: (
-                    "FOLLOW_UP_DONE" in text()
-                    and "Subagent completion-worker" in text()
-                )
-            )
+            wait(lambda: "FOLLOW_UP_DONE" in text() and "✓ completion-worker" in text())
             assert "EXPAND_ONLY_REPORT_DETAIL" not in text(), text()
             output.clear()
             os.write(master, b"\x0f")
@@ -262,8 +265,10 @@ def tui(mode):
             os.write(master, b"\x0f")
             output.clear()
             os.write(master, b"\x1b[200~/fixture-job\x1b[201~\r")
-            wait(lambda: "Job render-job" in text())
+            wait(lambda: "✗ render-job" in text() and "JOB_PREVIEW_ERROR" in text())
+            assert "exit 1 · 44s" in text(), text()
             assert "JOB_EXPAND_ONLY_DETAIL" not in text(), text()
+            assert "external event" not in text(), text()
             output.clear()
             os.write(master, b"\x0f")
             wait(lambda: "JOB_EXPAND_ONLY_DETAIL" in text())
@@ -274,7 +279,7 @@ def tui(mode):
             wait(
                 lambda: (
                     sum(row["type"] == "start" for row in records(directory)) == 2
-                    and "Job render-job" in text()
+                    and "✗ render-job" in text()
                 )
             )
             assert "JOB_EXPAND_ONLY_DETAIL" not in text(), text()
@@ -296,9 +301,10 @@ def tui(mode):
 if __name__ == "__main__":
     for scenario, count in [("read", 0), ("wait", 1), ("two", 2), ("mixed", 1)]:
         run(scenario, count)
-    run("job", 0, job_read=True)
+    for receipt in ["status", "status-only", "wait"]:
+        run("job", 0, job_read=receipt)
     run("job", 1, job_read=False)
-    run("job", 1, job_read=True, abort="continue")
-    run("job", 0, job_read=True, abort="close")
+    run("job", 1, job_read="status", abort="continue")
+    run("job", 0, job_read="wait", abort="close")
     for layout in ["regular", "fullscreen"]:
         tui(layout)

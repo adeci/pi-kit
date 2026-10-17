@@ -896,6 +896,7 @@ fn logs(parser: &mut Parser) -> Result<i32, Error> {
     let state = daemon.state()?;
     let task = daemon.checked(&state, &handle, &owner()?)?;
     let path = daemon.log_path(task.id);
+    let job = snapshot(task, label(task).ok_or("Invalid label")?, &daemon, None)?;
     if let Some(lines) = lines {
         let text = tail(&path, lines)?;
         drop(control);
@@ -910,6 +911,12 @@ fn logs(parser: &mut Parser) -> Result<i32, Error> {
         if let Some(mut file) = file {
             io::copy(&mut file, &mut io::stdout().lock())?;
         }
+    }
+    // Same terminal receipt as wait. The events extension treats it in a bash
+    // result as the session having read the job, and drops its notice.
+    if let Some(code) = job.exit_code {
+        io::stdout().flush()?;
+        eprintln!("job={handle} {} exit={code}", job.state);
     }
     Ok(0)
 }

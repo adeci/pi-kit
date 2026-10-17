@@ -27,7 +27,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p ../ui ../shared
     cp ${../ui}/*.ts ../ui/
     cp ${../shared}/*.ts ../shared/
-    bun test extension ../shared/completions.test.ts
+    bun test extension ../shared/completions.test.ts ../shared/completion-renderer.test.ts
     python3 -m unittest -v test_guard
     runHook postCheck
   '';

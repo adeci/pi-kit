@@ -32,7 +32,8 @@ export default function fixture(pi: any) {
         name: "render-job",
         state: "failed",
         exit_code: 1,
-        text: `job=${handle} failed exit=1\n${"build output ".repeat(50)}\nJOB_EXPAND_ONLY_DETAIL\nFull output: pi-jobs log ${handle}`,
+        elapsed_seconds: 44,
+        text: `job=${handle} (render-job) failed exit=1 elapsed=44s\n   Compiling JOB_EXPAND_ONLY_DETAIL v0.1.0\n${"build output ".repeat(50)}\nerror: JOB_PREVIEW_ERROR\nFull output: pi-jobs log ${handle}`,
       };
       pi.sendMessage(
         {
