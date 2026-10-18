@@ -9,6 +9,7 @@ let
   components = [
     "agents"
     "ask"
+    "claude-billing"
     "director"
     "events"
     "goal"

@@ -27,6 +27,7 @@
         agents = import ./src/agents/modules/nixos.nix self;
         jobs = import ./src/jobs/modules/nixos.nix self;
         events = import ./src/events/modules/nixos.nix self;
+        claude-billing = import ./src/claude-billing/modules/nixos.nix self;
       };
       flake.darwinModules = {
         default = import ./nix/suite.nix self "darwin";
@@ -40,6 +41,7 @@
         agents = import ./src/agents/modules/darwin.nix self;
         jobs = import ./src/jobs/modules/darwin.nix self;
         events = import ./src/events/modules/darwin.nix self;
+        claude-billing = import ./src/claude-billing/modules/darwin.nix self;
       };
       perSystem =
         {
@@ -60,6 +62,7 @@
             pi-kit-agents = pkgs.callPackage ./src/agents/default.nix { };
             pi-kit-jobs = pkgs.callPackage ./src/jobs/default.nix { };
             pi-kit-events = pkgs.callPackage ./src/events/default.nix { };
+            pi-kit-claude-billing = pkgs.callPackage ./src/claude-billing/default.nix { };
             skills = pkgs.runCommand "pi-kit-skills" { } ''
               mkdir -p $out/share/skills/kit-agents $out/share/skills/kit-jobs
               cp ${./src/agents/skill/SKILL.md} $out/share/skills/kit-agents/
@@ -77,6 +80,7 @@
                 config.packages.pi-kit-todos
                 config.packages.pi-kit-agents
                 config.packages.pi-kit-events
+                config.packages.pi-kit-claude-billing
                 config.packages.skills
                 config.packages.pi-kit-jobs
               ];
@@ -120,6 +124,7 @@
             agents = config.packages.pi-kit-agents;
             jobs = config.packages.pi-kit-jobs;
             events = config.packages.pi-kit-events;
+            claude-billing = config.packages.pi-kit-claude-billing;
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             module = import ./nix/module-test.nix {

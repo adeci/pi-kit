@@ -92,6 +92,7 @@ and module.
 
 - [Status](../src/status/README.md): a compact footer with model, directory, Git changes and context usage.
 - [Usage](../src/usage/README.md): OpenAI and Anthropic subscription allowances in one view.
+- [Claude billing](../src/claude-billing/README.md): use a Claude Pro/Max subscription with stock Pi.
 - [Todos](../src/todos/README.md): a branch-local task list.
 - [Handoff](../src/handoff/README.md): automatic context summaries and summarizer settings.
 - [Goal](../src/goal/README.md): an objective, budget and continuation controls.

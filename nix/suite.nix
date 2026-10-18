@@ -10,6 +10,7 @@ let
     "status"
     "usage"
     "ask"
+    "claude-billing"
     "agents"
     "jobs"
     "events"
