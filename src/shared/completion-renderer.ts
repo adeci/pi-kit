@@ -9,13 +9,14 @@ export function safeText(value: unknown): string {
   );
 }
 
-/** A compact completion card: one header line, a short preview, and a body
- * shown only when expanded (Ctrl+O). Colors are theme tokens. */
+/** A compact completion card: an accent bar in the status colour, a header
+ * (glyph, bold title, dim detail chips), a short preview on a thin gutter, and
+ * the full body only when expanded (Ctrl+O). Colours are theme tokens. */
 export interface CompletionCard {
   tone: "success" | "error" | "warning" | "accent" | "muted";
   glyph: string;
   title: string;
-  /** Dimmed header details; empty entries are skipped. */
+  /** Dim header chips; empty entries are skipped. */
   meta?: (string | undefined)[];
   /** Collapsed preview lines. */
   preview?: string[];
@@ -37,28 +38,33 @@ export function completionRenderer(
     return {
       invalidate() {},
       render(width: number) {
-        const inner = Math.max(1, width - pad.length);
+        const bar = pad + theme.fg(card.tone, "▌") + " ";
+        const inner = Math.max(1, width - pad.length - 2);
         const meta = (card.meta ?? []).filter(Boolean).map(line).join(" · ");
-        const header = truncateToWidth(
-          `${theme.fg(card.tone, card.glyph)} ${theme.bold(theme.fg(card.tone === "muted" ? "muted" : "text", line(card.title)))}${meta ? "  " + theme.fg("dim", meta) : ""}`,
-          inner,
-        );
-        const rows = [header];
+        const rows = [
+          truncateToWidth(
+            `${theme.fg(card.tone, card.glyph)} ${theme.bold(theme.fg(card.tone === "muted" ? "muted" : "text", line(card.title)))}${meta ? "  " + theme.fg("dim", meta) : ""}`,
+            inner,
+          ),
+        ];
+        const gutter = theme.fg("muted", "│") + " ";
         if (options.expanded) {
           for (const row of safeText(card.body ?? content).split("\n"))
             for (const wrapped of wrapTextWithAnsi(
               theme.fg("toolOutput", row),
               Math.max(1, inner - 2),
             ))
-              rows.push("  " + wrapped);
+              rows.push(gutter + wrapped);
         } else {
           for (const row of card.preview ?? [])
             rows.push(
-              "  " + theme.fg("muted", truncateToWidth(line(row), inner - 2)),
+              gutter + theme.fg("muted", truncateToWidth(line(row), inner - 2)),
             );
-          rows.push("  " + theme.fg("dim", "Ctrl+O expands"));
+          rows.push(
+            theme.fg("muted", "╰") + " " + theme.fg("dim", "Ctrl+O expands"),
+          );
         }
-        return rows.map((row) => truncateToWidth(pad + row, width));
+        return rows.map((row) => truncateToWidth(bar + row, width));
       },
     };
   });

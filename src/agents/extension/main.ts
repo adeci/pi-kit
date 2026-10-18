@@ -6,7 +6,7 @@ import { installUI } from "./ui";
 import { installKit } from "./kit";
 import { completionDelivery } from "../../shared/completions";
 import { completionRenderer } from "../../shared/completion-renderer";
-import { agentResultObserved, agentResultDescription } from "./notifications";
+import { agentResultDescription } from "./notifications";
 
 export default function agents(pi: ExtensionAPI) {
   // Workers inherit the parent's extensions, including this one. Their agent
@@ -146,15 +146,29 @@ export default function agents(pi: ExtensionAPI) {
         },
         notify: (_parent, result) => {
           if (generation !== current || !supervisor) return;
-          delivery.add(String(++notification), {
-            message: {
-              customType: "pi-agents-result",
-              content: `[Agent message/result — inspect authoritative artifacts before accepting work]\n${JSON.stringify(result, null, 2).slice(0, 12288)}`,
-              display: true,
-              details: result,
+          const { assignment, kind } = (result ?? {}) as {
+            assignment?: unknown;
+            kind?: unknown;
+          };
+          // Results are keyed by assignment so agent_status/agent_wait can
+          // withdraw them; messages from agents are never consumed that way.
+          delivery.add(
+            kind !== "agent-message" && typeof assignment === "string"
+              ? `agent:${assignment}`
+              : `agent-message:${++notification}`,
+            {
+              message: {
+                customType: "pi-agents-result",
+                content: `[Agent message/result — inspect authoritative artifacts before accepting work]\n${JSON.stringify(result, null, 2).slice(0, 12288)}`,
+                display: true,
+                details: result,
+              },
+              wake: true,
             },
-            observed: (entries) => agentResultObserved(result, entries),
-          });
+          );
+        },
+        consumed: (assignment) => {
+          if (generation === current) delivery.consume(`agent:${assignment}`);
         },
         observe: (topic, payload) => {
           // Optional observer publication, never the assignment/control channel.

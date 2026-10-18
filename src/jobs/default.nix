@@ -24,7 +24,11 @@ rustPlatform.buildRustPackage {
     pueue
     bun
   ];
-  postCheck = "bun test extension";
+  postCheck = ''
+    mkdir -p ../ui
+    cp ${../ui}/*.ts ../ui/
+    bun test extension
+  '';
   postInstall = ''
     mkdir -p $out/share/pi-kit/jobs/extension $out/share/pi-kit/ui
     cp ${../ui}/*.ts $out/share/pi-kit/ui/

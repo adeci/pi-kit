@@ -30,7 +30,7 @@ import {
 
 import { completionDelivery } from "../../shared/completions";
 import { completionRenderer } from "../../shared/completion-renderer";
-import { eventDescription, jobNotice, jobResultObserved } from "./completions";
+import { eventDescription, jobNotice, terminalJob } from "./completions";
 
 type Mode = "display" | "followUp";
 type Handler = (event: Event, signal: AbortSignal) => Promise<void> | void;
@@ -274,7 +274,14 @@ export default function events(pi: ExtensionAPI) {
             else process.stderr.write(`${content}\n`);
           } else {
             pending.add(event.id);
-            delivery.add(event.id, {
+            // Finished jobs are quiet and keyed by handle, so a read through
+            // pi-jobs status/wait/log can withdraw them. Everything else that
+            // follows up (messages, agent results) wakes the model.
+            const job =
+              event.topic === "job.completed" && event.source === "pi-jobs"
+                ? terminalJob(event.payload)
+                : undefined;
+            delivery.add(job ? `job:${job.handle}` : `event:${event.id}`, {
               message: {
                 customType: "pi-events",
                 content,
@@ -286,11 +293,8 @@ export default function events(pi: ExtensionAPI) {
                   payload: event.payload,
                 },
               },
-              observed:
-                event.topic === "job.completed" && event.source === "pi-jobs"
-                  ? (entries) => jobResultObserved(event.payload, entries)
-                  : undefined,
-              suppressed: () => pending.delete(event.id),
+              wake: !job,
+              withdrawn: () => pending.delete(event.id),
             });
           }
         }

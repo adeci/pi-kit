@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import {
   eventDescription,
   jobNotice,
-  jobResultObserved,
   relevantLines,
+  terminalJob,
 } from "./completions";
 const handle = `12:${"a".repeat(32)}`;
 const job = {
@@ -15,83 +15,15 @@ const job = {
   elapsed_seconds: 3,
   text: `job=${handle} (build) success exit=0 elapsed=3s\nresult line\nFull output: pi-jobs log ${handle}`,
 };
-const header = `job=${handle} success exit=0 (build) elapsed=3s`;
-const entry = (output: string, toolName = "bash") => ({
-  type: "message",
-  message: {
-    role: "toolResult",
-    toolName,
-    content: [{ type: "text", text: output }],
-  },
-});
-test("terminal status, wait or log receipts suppress; commands and running states do not", () => {
-  // pi-jobs status HANDLE, with or without --tail.
-  expect(jobResultObserved(job, [entry(header + "\nresult line\n")])).toBe(
-    true,
+test("only a protected handle in a terminal state is a consumable job result", () => {
+  expect(terminalJob(job)?.handle).toBe(handle);
+  expect(terminalJob({ ...job, state: "running", exit_code: null })).toBe(
+    undefined,
   );
-  expect(jobResultObserved(job, [entry(header)])).toBe(true);
-  // pi-jobs wait / log print the receipt on stderr after the output.
+  expect(terminalJob({ ...job, handle: "12" })).toBe(undefined);
   expect(
-    jobResultObserved(job, [
-      entry(`older output\njob=${handle} success exit=0\n`),
-    ]),
-  ).toBe(true);
-  expect(jobResultObserved(job, [entry("result line")])).toBe(false);
-  expect(jobResultObserved(job, [entry(`pi-jobs log ${handle}`)])).toBe(false);
-  expect(
-    jobResultObserved(job, [
-      entry(
-        `job=${handle} running; still running/queued. Continue with \`pi-jobs wait ${handle}\`.`,
-      ),
-    ]),
-  ).toBe(false);
-  expect(
-    jobResultObserved(job, [
-      entry(header.replace("success exit=0", "running") + "\nresult line"),
-    ]),
-  ).toBe(false);
-  expect(jobResultObserved(job, [entry(`job=${handle} success exit=00`)])).toBe(
-    false,
-  );
-  expect(
-    jobResultObserved(job, [entry(header + "\nresult line", "read")]),
-  ).toBe(false);
-  expect(
-    jobResultObserved({ ...job, handle: `12:${"b".repeat(32)}` }, [
-      entry(header + "\nresult line"),
-    ]),
-  ).toBe(false);
-  expect(
-    jobResultObserved({ ...job, exit_code: null, state: "running" }, [
-      entry(header),
-    ]),
-  ).toBe(false);
-});
-test("JSON receipts require terminal identity; shell error is not job-result loss", () => {
-  const row = { ...job, tail: "result line" };
-  expect(jobResultObserved(job, [entry(JSON.stringify([row]))])).toBe(true);
-  expect(
-    jobResultObserved(job, [entry(JSON.stringify([{ ...row, tail: "" }]))]),
-  ).toBe(true);
-  expect(
-    jobResultObserved(job, [
-      entry(JSON.stringify([{ ...row, owner: "other" }])),
-    ]),
-  ).toBe(false);
-  expect(
-    jobResultObserved(job, [
-      entry(JSON.stringify([{ ...row, state: "running", exit_code: null }])),
-    ]),
-  ).toBe(false);
-  const failure = {
-    ...job,
-    state: "failed",
-    exit_code: 1,
-    text: job.text.replace("success exit=0", "failed exit=1"),
-  };
-  const failed = entry(`job=${handle} failed exit=1`);
-  (failed.message as any).isError = true;
-  expect(jobResultObserved(failure, [failed])).toBe(true);
+    terminalJob({ ...job, state: "unavailable", exit_code: null })?.handle,
+  ).toBe(handle);
 });
 const noisy = [
   "warning: Git tree '/home/alex/git/pi-kit' has uncommitted changes",
@@ -150,7 +82,7 @@ test("job card: status glyph and tone, name as title, dimmed metadata", () => {
     "",
   );
   expect(card).toMatchObject({ tone: "error", glyph: "✗", title: "build" });
-  expect(card.meta).toEqual(["failed", "exit 1", "44s", handle]);
+  expect(card.meta).toEqual(["failed", "exit 1", "44s", "job 12"]);
   expect(card.preview).toHaveLength(4);
   expect(card.preview!.join("\n")).not.toContain("Compiling");
   expect(card.body).toContain("Compiling");
@@ -169,7 +101,7 @@ test("job card: status glyph and tone, name as title, dimmed metadata", () => {
   ).toMatchObject({
     tone: "success",
     glyph: "✓",
-    meta: [undefined, "exit 0", "3s", handle],
+    meta: [undefined, "exit 0", "3s", "job 12"],
   });
   expect(
     eventDescription(

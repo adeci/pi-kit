@@ -23,6 +23,24 @@ SOURCE = Path(__file__).resolve().parents[2]
 EVENTS = os.environ.get(
     "PI_EVENTS_TEST_EXTENSION", str(SOURCE / "events/extension/index.ts")
 )
+JOBS = os.environ.get("PI_JOBS_TEST_EXTENSION", str(SOURCE / "jobs/extension/index.ts"))
+# Stands in for a pi-jobs status/wait/log read receipt: the same job.consumed
+# frame the CLI publishes, sent to this session's live attachment.
+RECEIPT = """
+import json, os, socket, sys
+from pathlib import Path
+directory = Path(os.environ["XDG_RUNTIME_DIR"]) / "pi-events"
+subscription = json.loads(next(directory.glob("*.json")).read_text())
+frame = {"version": 1, "subscription": subscription["id"], "token": subscription["token"],
+         "event": {"version": 1, "id": os.urandom(16).hex(), "topic": "job.consumed",
+                   "source": "pi-jobs", "payload": {"handles": [sys.argv[1]]}}}
+with socket.socket(socket.AF_UNIX) as client:
+    client.settimeout(5)
+    client.connect(str(directory / (subscription["id"] + ".sock")))
+    client.sendall(json.dumps(frame).encode())
+    client.shutdown(socket.SHUT_WR)
+    assert json.loads(client.recv(65536))["ok"]
+"""
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)")
 
 
@@ -77,12 +95,39 @@ def records(directory):
     )
 
 
-def run(mode, expected, job_read=False, abort=None):
+def send_event(directory, topic, payload, event_id):
+    """Deliver one pi-jobs event to the live attachment, as pi-events would."""
+    subscriptions = list((directory / "runtime/pi-events").glob("*.json"))
+    assert subscriptions, "No live pi-events attachment"
+    subscription = json.loads(subscriptions[0].read_text())
+    frame = {
+        "version": 1,
+        "subscription": subscription["id"],
+        "token": subscription["token"],
+        "event": {
+            "version": 1,
+            "id": event_id,
+            "topic": topic,
+            "source": "pi-jobs",
+            "payload": payload,
+        },
+    }
+    with socket.socket(socket.AF_UNIX) as client:
+        client.settimeout(5)
+        client.connect(
+            str(directory / "runtime/pi-events" / (subscription["id"] + ".sock"))
+        )
+        client.sendall(json.dumps(frame).encode())
+        client.shutdown(socket.SHUT_WR)
+        assert json.loads(client.recv(65536))["ok"]
+
+
+def run(mode, expected, job_read=False, abort=None, finals=None):
+    """`finals` maps final assistant texts to their expected counts."""
     with tempfile.TemporaryDirectory(prefix="kc-", dir="/tmp") as temporary:
         directory = Path(temporary)
         env = setup(directory)
         handle = "12:" + "a" * 32
-        header = f"job={handle} success exit=0 (build) elapsed=3s"
         payload = {
             "handle": handle,
             "owner": "fixture",
@@ -93,62 +138,58 @@ def run(mode, expected, job_read=False, abort=None):
             "text": f"job={handle} (build) success exit=0 elapsed=3s\nretained output\nFull output: pi-jobs log {handle}",
         }
         if mode == "job":
+            receipt = directory / "receipt.py"
+            receipt.write_text(RECEIPT)
+            read = f"subprocess.run([sys.executable, {str(receipt)!r}, {handle!r}], check=True)\n"
             script = directory / "command.py"
             script.write_text(
-                "from pathlib import Path\nimport time\nPath('ready').touch()\ndeadline=time.monotonic()+15\nwhile not Path('release').exists():\n assert time.monotonic()<deadline\n time.sleep(.01)\n"
-                + {
-                    False: "print('wait interval elapsed')\n",
-                    # pi-jobs status --tail HANDLE
-                    "status": f"print({header + chr(10) + 'retained output'!r})\n",
-                    # pi-jobs status HANDLE: the terminal header alone
-                    "status-only": f"print({header!r})\n",
-                    # pi-jobs wait/log: output, then the stderr receipt
-                    "wait": f"import sys\nprint('retained output')\nprint({'job=' + handle + ' success exit=0'!r}, file=sys.stderr)\n",
-                }[job_read]
+                "from pathlib import Path\nimport subprocess, sys, time\n"
+                # Read before the completion notice arrives.
+                + (read if job_read == "before" else "")
+                + "Path('ready').touch()\ndeadline=time.monotonic()+15\nwhile not Path('release').exists():\n assert time.monotonic()<deadline\n time.sleep(.01)\n"
+                # Read after the notice was queued, before it was delivered.
+                + (read if job_read == "after" else "")
+                + (
+                    # Stay inside the tool call so Escape interrupts it.
+                    "Path('receipt-sent').touch()\nwhile True:\n assert time.monotonic()<deadline\n time.sleep(.01)\n"
+                    if abort and job_read == "after"
+                    else ""
+                )
+                + "print('retained output')\n"
             )
             env["PI_COMPLETION_JOB_COMMAND"] = "python3 " + shlex.quote(str(script))
-        pi = integration.Pi(env, directory, directory, extensions=[EVENTS])
+        pi = integration.Pi(env, directory, directory, extensions=[EVENTS, JOBS])
         try:
             pi.call("prompt", message="COMPLETION " + mode)
             if mode == "job":
                 integration.until(lambda: (directory / "ready").exists())
-                subscriptions = list((directory / "runtime/pi-events").glob("*.json"))
-                assert subscriptions, pi.seen
-                subscription = json.loads(subscriptions[0].read_text())
-                frame = {
-                    "version": 1,
-                    "subscription": subscription["id"],
-                    "token": subscription["token"],
-                    "event": {
-                        "version": 1,
-                        "id": "b" * 32,
-                        "topic": "job.completed",
-                        "source": "pi-jobs",
-                        "payload": payload,
-                    },
-                }
-                with socket.socket(socket.AF_UNIX) as client:
-                    client.settimeout(5)
-                    client.connect(
-                        str(
-                            directory
-                            / "runtime/pi-events"
-                            / (subscription["id"] + ".sock")
-                        )
-                    )
-                    client.sendall(json.dumps(frame).encode())
-                    client.shutdown(socket.SHUT_WR)
-                    assert json.loads(client.recv(65536))["ok"]
+                send_event(directory, "job.completed", payload, "b" * 32)
                 if abort:
+                    if job_read == "after":
+                        # Escape after the read: the receipt still withdraws.
+                        (directory / "release").touch()
+                        integration.until(lambda: (directory / "receipt-sent").exists())
                     pi.call("abort")
                     integration.until(
                         lambda: any(
                             row["type"] == "settled" for row in records(directory)
                         )
                     )
-                    assert not any(
-                        m.get("role") == "custom"
-                        for m in pi.call("get_messages")["messages"]
+                    # Escape never restarts work: a held notice is appended
+                    # quietly, with no new run.
+                    time.sleep(0.5)
+                    assert (
+                        sum(row["type"] == "settled" for row in records(directory)) == 1
+                    )
+                    assert (
+                        len(
+                            [
+                                m
+                                for m in pi.call("get_messages")["messages"]
+                                if m.get("role") == "custom"
+                            ]
+                        )
+                        == expected
                     )
                     if abort == "continue":
                         pi.call("prompt", message="CONTINUE")
@@ -157,7 +198,7 @@ def run(mode, expected, job_read=False, abort=None):
             integration.until(
                 lambda: (
                     sum(row["type"] == "settled" for row in records(directory))
-                    >= (2 if abort == "continue" else 1)
+                    >= (2 if abort == "continue" or mode.endswith("unread") else 1)
                 )
             )
             messages = pi.call("get_messages")["messages"]
@@ -172,8 +213,19 @@ def run(mode, expected, job_read=False, abort=None):
                 for part in message.get("content", [])
                 if part["type"] == "text"
             ]
-            assert final.count("PRIMARY_DONE") == (0 if abort == "close" else 1), final
-            assert final.count("FOLLOW_UP_DONE") == bool(expected), final
+            if mode.startswith("failed"):
+                # The worker settled without agent_yield: failed, no report.
+                assert "without an explicit result report" in json.dumps(messages), (
+                    messages
+                )
+            for response, count in (
+                finals
+                or {
+                    "PRIMARY_DONE": 0 if abort == "close" else 1,
+                    "FOLLOW_UP_DONE": int(bool(expected)),
+                }
+            ).items():
+                assert final.count(response) == count, (response, final)
             session = pi.call("get_state")["sessionFile"]
         finally:
             pi.close()
@@ -198,7 +250,7 @@ def run(mode, expected, job_read=False, abort=None):
         finally:
             resumed.close()
         print(
-            f"PASS {mode} job_read={job_read} abort={abort}: {expected} notices, at most one batch continuation, no replay"
+            f"PASS {mode} job_read={job_read} abort={abort}: {expected} notices, no extra turn, no replay"
         )
 
 
@@ -225,6 +277,8 @@ def tui(mode):
             integration.EXTENSION,
             "-e",
             EVENTS,
+            "-e",
+            JOBS,
             "--model",
             "pi-agents-fixture/scripted",
         ]
@@ -256,7 +310,7 @@ def tui(mode):
 
         try:
             wait(lambda: any(row["type"] == "start" for row in records(directory)))
-            os.write(master, b"\x1b[200~COMPLETION wait\x1b[201~\r")
+            os.write(master, b"\x1b[200~COMPLETION unread\x1b[201~\r")
             wait(lambda: "FOLLOW_UP_DONE" in text() and "✓ completion-worker" in text())
             assert "EXPAND_ONLY_REPORT_DETAIL" not in text(), text()
             output.clear()
@@ -274,6 +328,36 @@ def tui(mode):
             wait(lambda: "JOB_EXPAND_ONLY_DETAIL" in text())
             os.write(master, b"\x0f")
             output.clear()
+            # A finished job while idle: the card and the listening indicator
+            # appear, and no model turn starts.
+            settled = sum(row["type"] == "settled" for row in records(directory))
+            handle = "13:" + "c" * 32
+            send_event(
+                directory,
+                "job.completed",
+                {
+                    "handle": handle,
+                    "owner": "fixture",
+                    "name": "inbox-job",
+                    "state": "success",
+                    "exit_code": 0,
+                    "elapsed_seconds": 72,
+                    "text": f"job={handle} (inbox-job) success exit=0 elapsed=72s\nINBOX_TAIL\nFull output: pi-jobs log {handle}",
+                },
+                "d" * 32,
+            )
+            wait(
+                lambda: (
+                    "✓ inbox-job" in text()
+                    and "exit 0 · 1m12s · job 13" in text()
+                    and "◉ inbox  1 new" in text()
+                )
+            )
+            time.sleep(0.5)
+            assert (
+                sum(row["type"] == "settled" for row in records(directory)) == settled
+            ), "A finished job must not start a turn"
+            output.clear()
             count = sum(row["type"] == "custom" for row in records(directory))
             os.write(master, b"\x1b[200~/reload\x1b[201~\r")
             wait(
@@ -285,7 +369,7 @@ def tui(mode):
             assert "JOB_EXPAND_ONLY_DETAIL" not in text(), text()
             assert sum(row["type"] == "custom" for row in records(directory)) == count
             print(
-                f"PASS {mode}: agent/job collapsed previews, Ctrl+O expansion, reload without replay"
+                f"PASS {mode}: agent/job collapsed previews, Ctrl+O expansion, quiet job with indicator, reload without replay"
             )
         finally:
             if process.poll() is None:
@@ -299,12 +383,18 @@ def tui(mode):
 
 
 if __name__ == "__main__":
-    for scenario, count in [("read", 0), ("wait", 1), ("two", 2), ("mixed", 1)]:
-        run(scenario, count)
-    for receipt in ["status", "status-only", "wait"]:
+    # agent_status and agent_wait are structural receipts for any outcome.
+    for scenario in ["read", "wait", "two", "mixed", "failed-wait", "failed-status"]:
+        run(scenario, 0)
+    # Unread results arrive exactly once and wake the idle session.
+    for scenario in ["unread", "failed-unread"]:
+        run(scenario, 1)
+    # Jobs read before or after their notice arrives are withdrawn.
+    for receipt in ["before", "after"]:
         run("job", 0, job_read=receipt)
-    run("job", 1, job_read=False)
-    run("job", 1, job_read="status", abort="continue")
-    run("job", 0, job_read="wait", abort="close")
+    # An unread job lands before the final answer, with no extra turn.
+    run("job", 1, finals={"PRIMARY_DONE": 0, "FOLLOW_UP_DONE": 1})
+    run("job", 1, abort="continue", finals={"PRIMARY_DONE": 1, "FOLLOW_UP_DONE": 0})
+    run("job", 0, job_read="after", abort="close", finals={"PRIMARY_DONE": 0})
     for layout in ["regular", "fullscreen"]:
         tui(layout)

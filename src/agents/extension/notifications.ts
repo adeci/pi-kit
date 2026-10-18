@@ -1,34 +1,6 @@
-import { isDeepStrictEqual } from "node:util";
-import { object, text, toolMessages } from "../../shared/completions";
+import { object } from "../../shared/completions";
 import type { CompletionCard } from "../../shared/completion-renderer";
 
-export function agentResultObserved(
-  result: unknown,
-  entries: readonly unknown[],
-): boolean {
-  const expected = object(result);
-  // Questions/replies, live state, and persistence errors must not be swallowed.
-  if (!expected?.assignment || !expected.report || expected.persistenceFailed)
-    return false;
-  return toolMessages(entries, "agent_status").some((message) => {
-    if (message.isError) return false;
-    try {
-      // Read model-visible content, not rendering-only details or a nested call
-      // whose outer tool might have discarded the result.
-      const actual = JSON.parse(text(message.content));
-      return (
-        actual.assignment === expected.assignment &&
-        actual.outcome === expected.outcome &&
-        isDeepStrictEqual(actual.report, expected.report) &&
-        (!expected.partial || actual.partial === expected.partial) &&
-        (!expected.patch || actual.patch === expected.patch) &&
-        actual.error === expected.error
-      );
-    } catch {
-      return false;
-    }
-  });
-}
 export function agentResultDescription(
   details: unknown,
   content: string,

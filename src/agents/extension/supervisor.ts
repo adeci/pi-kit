@@ -72,6 +72,8 @@ interface Runtime {
 export interface SupervisorHooks {
   changed(): void;
   notify(parent: string, result: unknown): void;
+  /** The root caller has read this settled assignment's result. */
+  consumed?(assignment: string): void;
   observe(topic: string, payload: unknown): void;
 }
 export class Supervisor {
@@ -328,8 +330,16 @@ export class Supervisor {
         return this.spawn(caller, args);
       case "list":
         return this.list(caller, args.includeCompleted !== false);
-      case "status":
-        return this.status(caller, args.id, args.view ?? "status");
+      case "status": {
+        const view = args.view ?? "status";
+        // Taken in the same synchronous step as the snapshot status returns.
+        const receipts = ["status", "result"].includes(view)
+          ? this.receipts(caller, [this.get(caller, args.id)])
+          : [];
+        const result = await this.status(caller, args.id, view);
+        for (const assignment of receipts) this.hooks.consumed?.(assignment);
+        return result;
+      }
       case "assign":
         return this.assign(
           caller,
@@ -359,8 +369,16 @@ export class Supervisor {
       }
       case "send":
         return this.send(caller, args.id, text(args.message, "message"));
-      case "wait":
-        return this.wait(caller, args.ids, args.timeoutSeconds, signal);
+      case "wait": {
+        const { receipts, ...result } = await this.wait(
+          caller,
+          args.ids,
+          args.timeoutSeconds,
+          signal,
+        );
+        for (const assignment of receipts) this.hooks.consumed?.(assignment);
+        return result;
+      }
       case "stop": {
         const agent = this.get(caller, args.id);
         if (caller === agent.id)
@@ -1240,11 +1258,29 @@ export class Supervisor {
           signal?.addEventListener("abort", abort, { once: true });
         }),
       ]);
-      return { outcome, agents: selected.map((a) => this.public(a)) };
+      return {
+        outcome,
+        agents: selected.map((a) => this.public(a)),
+        receipts: this.receipts(caller, selected),
+      };
     } finally {
       clearTimeout(timer);
       if (abort) signal?.removeEventListener("abort", abort);
     }
+  }
+  // Returning a settled result to the root caller is the structural receipt:
+  // its pending completion notice is withdrawn, whatever the outcome. Compute
+  // this with the snapshot being returned, and only once finish() is done,
+  // since persistence can still change the result.
+  private receipts(caller: string, agents: Agent[]): string[] {
+    if (caller !== root) return [];
+    return agents.flatMap((agent) => {
+      const assignment = currentAssignment(agent);
+      return TERMINAL.has(assignment.state) &&
+        !this.runtime.get(agent.id)?.finishing
+        ? [assignment.id]
+        : [];
+    });
   }
   async status(caller: string, id: unknown, view: string) {
     const agent = this.get(caller, id),

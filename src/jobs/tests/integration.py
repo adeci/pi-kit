@@ -113,6 +113,27 @@ class Pi:
             f"No expected RPC event; stderr={self.log.read()}; events={self.seen}"
         )
 
+    def turns(self):
+        """Drain queued RPC events; return how many agent runs started."""
+        started = 0
+        while True:
+            try:
+                event = self.events.get_nowait()
+            except queue.Empty:
+                return started
+            self.seen.append(event)
+            started += event.get("type") == "agent_start"
+
+    def quiet(self, count, seconds=15):
+        """Wait for exactly `count` job notices, delivered without a turn."""
+        self.turns()
+        until(lambda: len(self.notices()) >= count, seconds)
+        time.sleep(0.3)
+        notices = self.notices()
+        assert len(notices) == count, notices
+        assert self.turns() == 0, "A finished job must not start a model turn"
+        return notices
+
     def notices(self):
         entries = [
             json.loads(line)
@@ -245,9 +266,8 @@ def main():
                 if trace:
                     time.sleep(1.3)
                     assert len(observed(trace)) == 1, trace.read_text()
-                pi.receive(lambda event: event.get("type") == "agent_end")
-                notices = pi.notices()
-                assert len(notices) == 1 and first in notices[0]["content"], notices
+                notices = pi.quiet(1)
+                assert first in notices[0]["content"], notices
                 assert "integration-complete" in notices[0]["content"]
                 second = submit("sleep 2; echo survived-pi-exit\n")
                 pi.close(signal.SIGKILL)
@@ -267,8 +287,8 @@ def main():
                     check=True,
                 )
                 assert json.loads(result.stdout)[0]["exit_code"] == 0
-                # The events extension treats this stderr line in a bash result
-                # as a read receipt and drops the pending completion notice.
+                # Receipts go to the stale attachment here and are rejected;
+                # the terminal stderr line is for the reader only.
                 for command in (["log", second], ["wait", second, "--timeout", "1"]):
                     read = subprocess.run(
                         [CLI, *command],
@@ -302,9 +322,8 @@ def main():
                     text=True,
                     check=True,
                 )
-                pi.receive(lambda event: event.get("type") == "agent_end")
-                notices = pi.notices()
-                assert len(notices) == 2 and second in notices[1]["content"], notices
+                notices = pi.quiet(2)
+                assert second in notices[1]["content"], notices
                 assert "survived-pi-exit" in notices[1]["content"]
                 for _ in range(2):
                     subprocess.run(
@@ -352,12 +371,8 @@ def main():
                 for command in ["echo instant\n", "echo failed; exit 7\n"]:
                     before = len(pi.notices())
                     handle = submit(command)
-                    pi.receive(lambda event: event.get("type") == "agent_end")
-                    time.sleep(0.3)
-                    notices = pi.notices()
-                    assert (
-                        len(notices) == before + 1 and handle in notices[-1]["content"]
-                    ), notices
+                    notices = pi.quiet(before + 1)
+                    assert handle in notices[-1]["content"], notices
                 # Running kills use the native hook; queued removals need the
                 # CLI signal because Pueue does not call its hook on removal.
                 for queued in [False, True]:
@@ -391,11 +406,7 @@ def main():
                         check=True,
                         capture_output=True,
                     )
-                    pi.receive(lambda event: event.get("type") == "agent_end")
-                    assert (
-                        len(pi.notices()) == before + 1
-                        and handle in pi.notices()[-1]["content"]
-                    )
+                    assert handle in pi.quiet(before + 1)[-1]["content"]
                     if queued:
                         subprocess.run(
                             [
@@ -426,11 +437,62 @@ def main():
                 assert len(pi.notices()) == before
                 if trace:
                     assert len(observed(trace)) == calls + 1
-                pi.receive(lambda event: event.get("type") == "agent_end")
-                assert (
-                    len(pi.notices()) == before + 1
-                    and handle in pi.notices()[-1]["content"]
+                assert handle in pi.quiet(before + 1)[-1]["content"]
+                # While the model is busy, notices are held: a job read in-band
+                # (pi-jobs wait) is withdrawn structurally, and an unread one is
+                # appended after the final answer without an extra turn.
+                before = len(pi.notices())
+                release = root / "release"
+                pi.turns()
+                pi.send({"type": "prompt", "message": f"HOLD {release}"})
+                pi.receive(lambda event: event.get("type") == "agent_start")
+                consumed = submit("sleep 0.5; echo read-in-band\n")
+                unread = submit("sleep 0.5; echo unread-while-busy\n")
+                read = subprocess.run(
+                    [CLI, "wait", consumed, "--timeout", "10"],
+                    env=fresh,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
+                assert read.returncode == 0 and "read-in-band" in read.stdout, read
+                time.sleep(2)
+                assert len(pi.notices()) == before, "Notices must wait for the turn"
+                release.touch()
+                pi.receive(lambda event: event.get("type") == "agent_end")
+                notices = pi.quiet(before + 1)
+                assert unread in notices[-1]["content"], notices
+                assert not any(consumed in notice["content"] for notice in notices)
+                entries = [
+                    json.loads(line)
+                    for line in Path(pi.attachment["session"]).read_text().splitlines()
+                ]
+                assert entries[-1]["type"] == "custom_message", entries[-1]
+                assert entries[-2]["message"]["role"] == "assistant", entries[-2]
+                # Foreground first: a run that finishes in time notifies nothing;
+                # one that outlives its deadline exits 75 and is watched.
+                before = len(pi.notices())
+                quick = subprocess.run(
+                    [CLI, "run", "--name", "quick"],
+                    env=fresh,
+                    input="echo foreground; exit 4\n",
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert quick.returncode == 4 and "foreground" in quick.stdout, quick
+                slow = subprocess.run(
+                    [CLI, "run", "--name", "slow", "--timeout", "0.5"],
+                    env=fresh,
+                    input="sleep 2; echo detached-late\n",
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                assert slow.returncode == 75 and "still running" in slow.stdout, slow
+                assert "could not attach" not in slow.stderr, slow.stderr
+                notices = pi.quiet(before + 1)
+                assert "detached-late" in notices[-1]["content"], notices
                 print(
                     json.dumps(
                         {
@@ -438,7 +500,9 @@ def main():
                                 [PI, "--version"], text=True
                             ).strip(),
                             "responsive_before_completion": True,
-                            "completion_triggered_turn": True,
+                            "completion_is_quiet": True,
+                            "reads_withdraw_notices": True,
+                            "foreground_first_run": True,
                             "jobs_survive_sigkill": True,
                             "no_offline_replay": True,
                             "stale_attachment_rejected": True,

@@ -76,7 +76,11 @@ export default function fixture(pi: any) {
       const spawns = results
         .filter((m: any) => m.toolName === "agent_spawn")
         .map((m: any) => JSON.parse(text(m)));
-      if (child) {
+      let hold: (() => boolean) | undefined;
+      if (child && messages.some((m: any) => text(m).includes("FIXTURE_FAIL")))
+        // Settle without agent_yield: a failed assignment with no report.
+        response = "NO_REPORT";
+      else if (child) {
         name = "agent_yield";
         args = {
           outcome: "completed",
@@ -96,10 +100,34 @@ export default function fixture(pi: any) {
         args = {
           role: "scout",
           name: `completion-worker-${spawns.length}`,
-          task: "Return a fixture report",
+          task: mode.startsWith("failed")
+            ? "FIXTURE_FAIL: yield a failed outcome"
+            : "Return a fixture report",
           lifetime: "task",
           tools: ["read"],
         };
+      } else if (mode.endsWith("unread")) {
+        // Never reads the result: it must arrive exactly once, waking Pi.
+        if (text(messages.at(-1)).includes("Agent message/result"))
+          response = "FOLLOW_UP_DONE";
+      } else if (mode === "failed-status") {
+        // Read with agent_status alone. The child settles while this response
+        // is being produced, so its notice is pending when the read happens.
+        if (!results.some((m: any) => m.toolName === "agent_status")) {
+          let settledAt = 0;
+          hold = () => {
+            let active = 1;
+            pi.events.emit("pi-kit:agents:query", (state: any) => {
+              active = state.active;
+            });
+            if (active) return true;
+            settledAt ||= Date.now();
+            return Date.now() - settledAt < 500;
+          };
+          name = "agent_status";
+          args = { id: spawns[0].id, view: "result" };
+        } else if (text(messages.at(-1)).includes("Agent message/result"))
+          response = "FOLLOW_UP_DONE";
       } else if (!results.some((m: any) => m.toolName === "agent_wait")) {
         name = "agent_wait";
         args = { ids: spawns.map((s: any) => s.id), timeoutSeconds: 30 };
@@ -137,11 +165,20 @@ export default function fixture(pi: any) {
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         },
       };
-      queueMicrotask(() => {
+      const respond = () => {
         stream.push({ type: "start", partial: message });
         stream.push({ type: "done", reason: message.stopReason, message });
         stream.end();
-      });
+      };
+      if (!hold) queueMicrotask(respond);
+      else {
+        const deadline = Date.now() + 30000;
+        const timer = setInterval(() => {
+          if (hold!() && Date.now() < deadline) return;
+          clearInterval(timer);
+          respond();
+        }, 50);
+      }
       return stream;
     },
   });

@@ -48,11 +48,19 @@ export function guardBash(
     const reason =
       daemon && !daemon.ok
         ? `This is a long-running command (${label}), but pi-jobs is not ready: ${daemon.detail} If only the callback is unverified, run pi-jobs doctor and retry; otherwise tell the user. Do not run long commands in foreground bash.`
-        : `This is a long-running command (${label}). Submit it with pi-jobs run --detach --name NAME (command text on stdin) and continue; do not run it in foreground bash.`;
+        : `This is a long-running command (${label}). Run it with pi-jobs run --name NAME (command text on stdin): it streams output and returns the exit code if it finishes within 90 seconds, otherwise it detaches with exit 75 and you are notified when it finishes. Use pi-jobs run --detach to start it and move on. Do not run it in foreground bash.`;
     return { block: true, reason };
   }
-  if (input.timeout === undefined || input.timeout === null) {
-    if (!PI_JOBS.test(command)) input.timeout = DEFAULT_BASH_TIMEOUT;
-  }
+  if (PI_JOBS.test(command)) {
+    // pi-jobs run/wait detach on their own 90-second deadline and arm a watch.
+    // A shorter bash timeout would kill the CLI first (SIGKILL), leaving the
+    // job running with no watch, so never let one undercut that deadline.
+    if (
+      typeof input.timeout === "number" &&
+      input.timeout < DEFAULT_BASH_TIMEOUT
+    )
+      input.timeout = DEFAULT_BASH_TIMEOUT;
+  } else if (input.timeout === undefined || input.timeout === null)
+    input.timeout = DEFAULT_BASH_TIMEOUT;
   return undefined;
 }

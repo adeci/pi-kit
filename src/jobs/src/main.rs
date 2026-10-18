@@ -35,10 +35,12 @@ const USAGE: &str = "pi-jobs <command> [options]
   health                      inspect callback verification without submitting work
   config-path                 print selected config path
   run [--detach] [--timeout SECONDS] [-C DIR] [--name NAME] [--check-in SECONDS]
-                              read command from stdin; no execution deadline
+                              read command from stdin; stream output in the
+                              foreground for up to --timeout (default 90s), then
+                              detach and arm a completion watch; no execution deadline
   status [HANDLE...] [--json] [--tail LINES]
   log HANDLE [--lines LINES]   full output by default
-  wait HANDLE [--timeout SECONDS]
+  wait HANDLE [--timeout SECONDS]   default 90s
   stop HANDLE                 explicitly stop the task; wait cancellation never does
   forget HANDLE               delete a finished owned task and its retained data
   watch HANDLE [--check-in SECONDS]
@@ -47,7 +49,15 @@ const USAGE: &str = "pi-jobs <command> [options]
 Check-in intervals are 10-604800 seconds; progress does not wake the model.
 Inside Pi, the jobs extension supplies session identity and watch attachment.
 Outside Pi, set PI_JOBS_SESSION explicitly. PI_JOBS_CONFIG selects the isolated
-Pueue config. Detached/pending operations exit 0, not a build-failure code.";
+Pueue config. A finished job exits with its own code. Exit 75 means the job is
+still running and this command detached (run/wait deadline); `run --detach`
+exits 0. Reading a finished job with status, wait or log tells the owning Pi
+session, which then drops that job's watch and pending completion notice.";
+
+/// Exit code for "still running; this command detached" (EX_TEMPFAIL).
+const DETACHED: i32 = 75;
+/// Foreground deadline for run/wait: below the jobs extension's 120s bash cap.
+const FOREGROUND_SECONDS: f64 = 90.0;
 
 #[derive(Clone, Deserialize, Serialize)]
 struct Label {
@@ -735,7 +745,7 @@ fn init(parser: &mut Parser) -> Result<i32, Error> {
 
 fn run(parser: &mut Parser) -> Result<i32, Error> {
     let mut detach = false;
-    let mut timeout = 100.0;
+    let mut timeout = FOREGROUND_SECONDS;
     let mut dir = env::current_dir()?;
     let mut name = String::new();
     let mut interval = None;
@@ -800,11 +810,24 @@ fn run(parser: &mut Parser) -> Result<i32, Error> {
         println!("job={handle} submitted; execution continues independently of Pi");
         return Ok(0);
     }
-    let result = follow(&mut daemon, &handle, &owner, timeout)?;
-    if result.is_none() {
-        attach_watch(&handle, interval);
+    // Foreground first, but armed from submission: if this CLI is killed while
+    // following (Escape, a bash timeout), the job still reports back. A run
+    // that finishes in time is read here, so it consumes its own notice; only a
+    // run that outlives its deadline leaves the watch to deliver.
+    let watched = attach_watch(&handle, interval);
+    if let Some(code) = follow(&mut daemon, &handle, &owner, timeout)? {
+        consume(&[handle]);
+        return Ok(code);
     }
-    Ok(result.unwrap_or(0))
+    println!(
+        "job={handle} still running after {timeout}s; detached (exit {DETACHED}). {} Resume waiting with `pi-jobs wait {handle}` or inspect with `pi-jobs status {handle}`.",
+        if watched {
+            "A completion notice will arrive when it finishes; do not poll."
+        } else {
+            "No completion watch is attached."
+        }
+    );
+    Ok(DETACHED)
 }
 
 fn validate_timeout(seconds: f64) -> Result<(), Error> {
@@ -877,6 +900,14 @@ fn status(parser: &mut Parser) -> Result<i32, Error> {
             print_snapshot(job);
         }
     }
+    io::stdout().flush()?;
+    consume(
+        &jobs
+            .iter()
+            .filter(|job| job.exit_code.is_some())
+            .map(|job| job.handle.clone())
+            .collect::<Vec<_>>(),
+    );
     Ok(0)
 }
 
@@ -912,11 +943,12 @@ fn logs(parser: &mut Parser) -> Result<i32, Error> {
             io::copy(&mut file, &mut io::stdout().lock())?;
         }
     }
-    // Same terminal receipt as wait. The events extension treats it in a bash
-    // result as the session having read the job, and drops its notice.
+    // Same terminal line as wait, for the reader. Consumption is the
+    // structural signal below, not this text.
     if let Some(code) = job.exit_code {
         io::stdout().flush()?;
         eprintln!("job={handle} {} exit={code}", job.state);
+        consume(&[handle]);
     }
     Ok(0)
 }
@@ -947,10 +979,6 @@ fn follow(
             return Ok(Some(code));
         }
         if Instant::now() >= deadline {
-            println!(
-                "job={handle} {}; still running/queued. Continue with `pi-jobs wait {handle}`.",
-                job.state
-            );
             return Ok(None);
         }
         thread::sleep(
@@ -961,7 +989,7 @@ fn follow(
 
 fn wait(parser: &mut Parser) -> Result<i32, Error> {
     let mut handle = None;
-    let mut timeout = 100.0;
+    let mut timeout = FOREGROUND_SECONDS;
     while let Some(arg) = parser.next()? {
         match arg {
             Value(value) if handle.is_none() => handle = Some(value.string()?),
@@ -970,14 +998,18 @@ fn wait(parser: &mut Parser) -> Result<i32, Error> {
         }
     }
     validate_timeout(timeout)?;
+    let handle = handle.ok_or("wait requires a job handle")?;
     let mut daemon = Daemon::connect()?;
-    Ok(follow(
-        &mut daemon,
-        &handle.ok_or("wait requires a job handle")?,
-        &owner()?,
-        timeout,
-    )?
-    .unwrap_or(0))
+    if let Some(code) = follow(&mut daemon, &handle, &owner()?, timeout)? {
+        consume(&[handle]);
+        return Ok(code);
+    }
+    // A wait never arms a watch: the job keeps whatever watch it already has,
+    // so a timeout cannot create a duplicate notice.
+    println!(
+        "job={handle} still running after {timeout}s; detached (exit {DETACHED}). An existing completion watch stays attached. Continue with `pi-jobs wait {handle}`."
+    );
+    Ok(DETACHED)
 }
 
 fn stop(parser: &mut Parser) -> Result<i32, Error> {
@@ -1041,22 +1073,49 @@ fn watch(parser: &mut Parser, action: &str) -> Result<i32, Error> {
     let handle = handle.ok_or("watch/unwatch requires a job handle")?;
     handle_parts(&handle)?;
     validate_interval(interval)?;
-    send_attachment(action, &handle, interval)?;
+    send_attachment(
+        action,
+        serde_json::json!({"handle": handle, "interval": interval}),
+    )?;
     println!("job={handle} {action} accepted; execution unchanged");
     Ok(0)
 }
 
-fn attach_watch(handle: &str, interval: Option<u64>) {
-    if env::var_os("PI_EVENTS_SESSION").is_some() {
-        if let Err(error) = send_attachment("watch", handle, interval) {
-            eprintln!(
+fn live_session() -> bool {
+    env::var_os("PI_EVENTS_SESSION").is_some_and(|value| !value.is_empty())
+}
+
+/// Arm the owning session's completion watch. Returns whether it attached.
+fn attach_watch(handle: &str, interval: Option<u64>) -> bool {
+    if live_session() {
+        match send_attachment(
+            "watch",
+            serde_json::json!({"handle": handle, "interval": interval}),
+        ) {
+            Ok(()) => return true,
+            Err(error) => eprintln!(
                 "job={handle} submitted, but completion watch could not attach: {error}. Execution is still running; inspect with pi-jobs status."
-            );
+            ),
         }
     } else if interval.is_some() {
         eprintln!(
             "job={handle}: no live Pi attachment; requested check-ins unavailable. Execution continues."
         );
+    }
+    false
+}
+
+/// Tell the owning live session that these finished jobs have been read, so it
+/// drops their watches and any pending completion notice. Best effort: outside
+/// Pi, or without a live attachment, there is nothing to withdraw.
+fn consume(handles: &[String]) {
+    if handles.is_empty() || !live_session() {
+        return;
+    }
+    for chunk in handles.chunks(64) {
+        if send_attachment("consumed", serde_json::json!({"handles": chunk})).is_err() {
+            return;
+        }
     }
 }
 
@@ -1075,13 +1134,12 @@ fn callback_readiness() -> Result<(), Error> {
     Ok(())
 }
 
-fn send_attachment(action: &str, handle: &str, interval: Option<u64>) -> Result<(), Error> {
+fn send_attachment(action: &str, request: serde_json::Value) -> Result<(), Error> {
     let session = owner()?;
     if action == "watch" {
         callback_readiness()?;
     }
     let binary = env::var_os("PI_EVENTS_BIN").unwrap_or_else(|| "pi-events".into());
-    let request = serde_json::json!({"handle":handle,"interval":interval});
     let mut child = process::Command::new(binary)
         .args([
             "publish",

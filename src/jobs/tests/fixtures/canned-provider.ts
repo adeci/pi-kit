@@ -1,5 +1,5 @@
 // Offline test fixture only. Never install this provider into a real profile.
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai";
 
 export default function (pi: any) {
@@ -18,8 +18,17 @@ export default function (pi: any) {
         maxTokens: 1000,
       },
     ],
-    streamSimple: (model: any) => {
+    streamSimple: (model: any, context: any) => {
       const stream = new AssistantMessageEventStream();
+      // "HOLD PATH" keeps the model busy until PATH exists.
+      const last = context?.messages?.at(-1);
+      const prompt =
+        last?.role === "user"
+          ? typeof last.content === "string"
+            ? last.content
+            : (last.content ?? []).map((part: any) => part.text ?? "").join("")
+          : "";
+      const hold = prompt.startsWith("HOLD ") ? prompt.slice(5).trim() : "";
       const message: any = {
         role: "assistant",
         api: model.api,
@@ -37,7 +46,7 @@ export default function (pi: any) {
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         },
       };
-      queueMicrotask(() => {
+      const respond = () => {
         stream.push({ type: "start", partial: message });
         message.content.push({
           type: "text",
@@ -58,7 +67,16 @@ export default function (pi: any) {
         });
         stream.push({ type: "done", reason: "stop", message });
         stream.end();
-      });
+      };
+      if (!hold) queueMicrotask(respond);
+      else {
+        const deadline = Date.now() + 30000;
+        const timer = setInterval(() => {
+          if (!existsSync(hold) && Date.now() < deadline) return;
+          clearInterval(timer);
+          respond();
+        }, 50);
+      }
       return stream;
     },
   });

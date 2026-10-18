@@ -1,8 +1,9 @@
 use std::{
     fs,
+    io::Write,
     process::{Child, Command, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 struct Sandbox {
@@ -83,6 +84,8 @@ impl Sandbox {
             .args(args)
             .env("PI_JOBS_CONFIG", &self.config)
             .env("PI_JOBS_SESSION", "test-owner")
+            .env_remove("PI_EVENTS_SESSION")
+            .env_remove("PI_EVENTS_SUBSCRIPTION")
             .env_remove("PI_JOBS_SOCKET")
             .env_remove("PI_JOBS_TOKEN");
         let publisher = self._dir.path().join("publisher");
@@ -103,6 +106,64 @@ impl Sandbox {
         fs::write(&script, format!("#!{}\nwhile IFS= read -r line || [ -n \"$line\" ]; do printf '%s' \"$line\"; done > '{}'\n", shell.display(), body.display())).unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
         body
+    }
+
+    /// A publisher that appends one line per call: its arguments, then the
+    /// event payload. Lets tests count watch and consumption signals.
+    fn recorder(&self) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let shell = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|directory| directory.join("bash"))
+            .find(|path| path.is_file())
+            .unwrap();
+        let log = self._dir.path().join("published");
+        let script = self._dir.path().join("publisher");
+        fs::write(&script, format!("#!{}\n{{ printf '%s ' \"$@\"; while IFS= read -r line || [ -n \"$line\" ]; do printf '%s' \"$line\"; done; printf '\\n'; }} >> '{}'\n", shell.display(), log.display())).unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        log
+    }
+
+    /// Published payloads for one topic, in order.
+    fn published(log: &std::path::Path, topic: &str) -> Vec<serde_json::Value> {
+        let marker = format!("--topic {topic} ");
+        fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.contains(&marker))
+            .map(|line| serde_json::from_str(&line[line.find('{').unwrap()..]).unwrap())
+            .collect()
+    }
+
+    fn live(&self, args: &[&str]) -> Command {
+        let mut command = self.command(args);
+        command.env("PI_EVENTS_SESSION", "test-owner");
+        command
+    }
+
+    fn submit_live(&self, args: &[&str], text: &str) -> (String, std::process::Output) {
+        use std::io::Write;
+        let mut child = self
+            .live(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(text.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let handle = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("job="))
+            .and_then(|value| value.split_whitespace().next())
+            .unwrap_or_else(|| panic!("No handle: {stderr}"))
+            .to_string();
+        (handle, output)
     }
 
     fn cli(&self, args: &[&str]) -> std::process::Output {
@@ -308,11 +369,12 @@ fn soft_wait_limit_does_not_kill_execution() {
     let sandbox = Sandbox::new();
     let (handle, output) =
         sandbox.submit(&["run", "--timeout", "0.02"], "sleep 0.3; echo finished");
-    assert!(
-        output.status.success(),
-        "Pending control operation must not look like build failure"
+    assert_eq!(
+        output.status.code(),
+        Some(75),
+        "A detached run exits 75, never a build-failure code"
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("still running/queued"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("still running after"));
     let waited = sandbox.cli(&["wait", &handle, "--timeout", "2"]);
     assert!(waited.status.success());
     assert!(String::from_utf8_lossy(&waited.stdout).contains("finished"));
@@ -517,4 +579,153 @@ fn unresponsive_daemon_has_a_bounded_error() {
         "Daemon handshake waited indefinitely"
     );
     server.join().unwrap();
+}
+
+fn live_sandbox() -> (Sandbox, std::path::PathBuf) {
+    let sandbox = Sandbox::with_callbacks(true);
+    let log = sandbox.recorder();
+    let doctor = sandbox.cli(&["doctor"]);
+    assert!(
+        doctor.status.success(),
+        "{}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    (sandbox, log)
+}
+
+#[test]
+fn foreground_run_is_armed_from_submission_and_consumes_its_own_result() {
+    let (sandbox, log) = live_sandbox();
+    // Finishes in time: real exit code, output streamed. The watch armed at
+    // submission is consumed by this in-band read, so no notice remains.
+    let (quick, output) = sandbox.submit_live(&["run", "--name", "quick"], "echo streamed; exit 3");
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("streamed"));
+    let watches = Sandbox::published(&log, "job.watch");
+    assert_eq!(watches.len(), 1);
+    assert_eq!(watches[0]["handle"], quick.as_str());
+    assert_eq!(
+        Sandbox::published(&log, "job.consumed"),
+        vec![serde_json::json!({"handles": [quick]})]
+    );
+    // Outlives its deadline: exit 75, a clear message, still exactly one watch
+    // for it and no receipt, so the watch delivers the result later.
+    let (slow, output) = sandbox.submit_live(&["run", "--timeout", "0.3"], "sleep 1.5; echo late");
+    assert_eq!(output.status.code(), Some(75));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("still running"), "{stdout}");
+    assert!(stdout.contains(&format!("pi-jobs wait {slow}")), "{stdout}");
+    assert!(stdout.contains("notice will arrive"), "{stdout}");
+    let watches = Sandbox::published(&log, "job.watch");
+    assert_eq!(watches.len(), 2);
+    assert_eq!(watches[1]["handle"], slow.as_str());
+    assert_eq!(Sandbox::published(&log, "job.consumed").len(), 1);
+    // A wait timeout re-detaches with 75 and never arms a second watch.
+    let waited = sandbox
+        .live(&["wait", &slow, "--timeout", "0.2"])
+        .output()
+        .unwrap();
+    assert_eq!(waited.status.code(), Some(75));
+    assert_eq!(Sandbox::published(&log, "job.watch").len(), 2);
+    assert_eq!(Sandbox::published(&log, "job.consumed").len(), 1);
+    // A wait that finishes in-band is a read: one receipt for that handle.
+    let waited = sandbox
+        .live(&["wait", &slow, "--timeout", "5"])
+        .output()
+        .unwrap();
+    assert_eq!(waited.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&waited.stdout).contains("late"));
+    assert_eq!(
+        Sandbox::published(&log, "job.consumed")[1],
+        serde_json::json!({"handles": [slow]})
+    );
+}
+
+#[test]
+fn killed_foreground_run_keeps_its_watch() {
+    // Escape or a bash timeout SIGKILLs the CLI mid-follow. The job keeps
+    // running and its watch, armed at submission, must still deliver it.
+    let (sandbox, log) = live_sandbox();
+    let mut child = sandbox
+        .live(&["run", "--name", "killed"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"sleep 1; echo survived")
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Sandbox::published(&log, "job.watch").is_empty() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
+    child.kill().unwrap();
+    let _ = child.wait();
+    assert_eq!(Sandbox::published(&log, "job.watch").len(), 1);
+    assert!(Sandbox::published(&log, "job.consumed").is_empty());
+}
+
+#[test]
+fn detach_arms_immediately_and_reads_of_finished_jobs_are_receipts() {
+    let (sandbox, log) = live_sandbox();
+    let (handle, output) = sandbox.submit_live(&["run", "--detach"], "sleep 0.6; echo done");
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        Sandbox::published(&log, "job.watch"),
+        vec![serde_json::json!({"handle": handle, "interval": null})]
+    );
+    // Running: status and log are not receipts.
+    assert!(
+        sandbox
+            .live(&["status", &handle])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(
+        sandbox
+            .live(&["log", &handle])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(Sandbox::published(&log, "job.consumed").is_empty());
+    // Outside a live Pi attachment nothing is published.
+    assert_eq!(
+        sandbox
+            .cli(&["wait", &handle, "--timeout", "5"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert!(Sandbox::published(&log, "job.consumed").is_empty());
+    let receipt = serde_json::json!({"handles": [handle]});
+    for (index, command) in [
+        vec!["status", handle.as_str()],
+        vec!["status", "--json"],
+        vec!["log", handle.as_str(), "--lines", "1"],
+        vec!["wait", handle.as_str()],
+    ]
+    .iter()
+    .enumerate()
+    {
+        let output = sandbox.live(command).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{command:?}");
+        let receipts = Sandbox::published(&log, "job.consumed");
+        assert_eq!(receipts.len(), index + 1, "{command:?}");
+        assert_eq!(receipts[index], receipt, "{command:?}");
+    }
+    // log keeps its terminal line for the reader.
+    let output = sandbox.live(&["log", &handle]).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).lines().last(),
+        Some(format!("job={handle} success exit=0").as_str())
+    );
+    assert_eq!(Sandbox::published(&log, "job.watch").len(), 1);
 }

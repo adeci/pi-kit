@@ -1,5 +1,10 @@
-import { expect, test } from "bun:test";
-import jobs, { interval, jobGuidance } from "./index";
+import { expect, mock, test } from "bun:test";
+// Pi provides its TUI package at runtime; the widget is tested separately.
+mock.module("@earendil-works/pi-tui", () => ({
+  truncateToWidth: (text: string) => text,
+  visibleWidth: (text: string) => text.length,
+}));
+const { default: jobs, interval, jobGuidance } = await import("./index");
 import { formatJob, jobEvent } from "./watcher";
 
 test("loaded jobs extension supplies guidance even when skills are disabled", () => {

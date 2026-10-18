@@ -1,10 +1,8 @@
-import { object, text, toolMessages } from "../../shared/completions";
+import { object } from "../../shared/completions";
 import type { CompletionCard } from "../../shared/completion-renderer";
 
 const HANDLE = /^\d+:[a-f0-9]{32}$/;
-const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-function terminalJob(payload: unknown) {
+export function terminalJob(payload: unknown) {
   const job = object(payload);
   return job &&
     typeof job.handle === "string" &&
@@ -13,39 +11,6 @@ function terminalJob(payload: unknown) {
     (job.exit_code !== null || job.state === "unavailable")
     ? job
     : undefined;
-}
-
-// A bash result showing this job's terminal state means the session has read
-// the result, whichever pi-jobs command printed it:
-//   status:  job=H STATE exit=N (NAME) elapsed=Ns   (or --json rows)
-//   wait/log (stderr, after the output): job=H STATE exit=N
-// A command line, a running status or a wait timeout is not a receipt.
-export function jobResultObserved(
-  payload: unknown,
-  entries: readonly unknown[],
-): boolean {
-  const job = terminalJob(payload);
-  if (!job) return false;
-  const receipt = new RegExp(
-    `^job=${escape(job.handle)} ${escape(job.state)}${job.exit_code === null ? "" : ` exit=${job.exit_code}`}(?: \\(| elapsed=|$)`,
-    "m",
-  );
-  return toolMessages(entries, "bash").some((message) => {
-    const output = text(message.content);
-    if (receipt.test(output)) return true;
-    try {
-      const parsed = JSON.parse(output);
-      return (Array.isArray(parsed) ? parsed : [parsed]).some(
-        (row) =>
-          row?.handle === job.handle &&
-          row.owner === job.owner &&
-          row.state === job.state &&
-          row.exit_code === job.exit_code,
-      );
-    } catch {
-      return false;
-    }
-  });
 }
 
 // Build and fetch chatter that says nothing about the result.
@@ -126,7 +91,10 @@ export function eventDescription(
         job.state === "success" ? undefined : String(job.state),
         job.exit_code == null ? undefined : `exit ${job.exit_code}`,
         elapsed(job.elapsed_seconds),
-        String(job.handle ?? ""),
+        // The full handle stays in the model-facing text and expanded body.
+        typeof job.handle === "string"
+          ? `job ${job.handle.split(":")[0]}`
+          : undefined,
       ],
       preview: relevantLines(body, job.state === "success" ? 2 : 4),
       body: [

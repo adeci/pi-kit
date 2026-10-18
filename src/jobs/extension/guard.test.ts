@@ -27,9 +27,9 @@ test("quick commands and pi-jobs submissions pass", () => {
 
 test("long commands are refused with a daemon-aware reason", () => {
   const input = { command: "nix build .#x" };
-  expect(guardBash(input, { ok: true, detail: "" })?.reason).toContain(
-    "pi-jobs run --detach",
-  );
+  const reason = guardBash(input, { ok: true, detail: "" })?.reason;
+  expect(reason).toContain("pi-jobs run --name NAME");
+  expect(reason).toContain("exit 75");
   const down = guardBash(input, {
     ok: false,
     detail: "Pueue unavailable at /run/user/1/pi-jobs/pueue/socket.",
@@ -51,4 +51,15 @@ test("other foreground commands get a timeout backstop", () => {
   };
   guardBash(wait, undefined);
   expect(wait.timeout).toBeUndefined();
+});
+
+test("a bash timeout never kills pi-jobs before its own detach deadline", () => {
+  // Bash timeouts SIGKILL the CLI: a foreground run killed at 30s would leave
+  // its job running with no watch armed.
+  const short = { command: "echo 'make' | pi-jobs run --name x", timeout: 30 };
+  guardBash(short, undefined);
+  expect(short.timeout).toBe(DEFAULT_BASH_TIMEOUT);
+  const long = { command: "pi-jobs wait 1:" + "a".repeat(32), timeout: 600 };
+  guardBash(long, undefined);
+  expect(long.timeout).toBe(600);
 });
