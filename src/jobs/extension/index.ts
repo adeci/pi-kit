@@ -7,7 +7,6 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { widgetStyle } from "../../ui/style";
 import { jobEvent, type Job } from "./watcher";
 import { listeningLines } from "./listening";
 import {
@@ -124,7 +123,17 @@ const CONSUME = "pi-kit:completions:consume";
 const ARM = "pi-kit:completions:arm";
 const QUIET = "pi-kit:completions:quiet";
 
-export default function jobs(pi: ExtensionAPI) {
+export default async function jobs(pi: ExtensionAPI) {
+  // Pi loads this entry through the profile symlink, so a static
+  // `../../ui/style` import resolves against the symlink's directory rather
+  // than the store path. Shared modules must come from the real path, as the
+  // menu import below already does.
+  const { widgetStyle } = await import(
+    resolve(
+      dirname(realpathSync(fileURLToPath(import.meta.url))),
+      "../../ui/style.ts",
+    )
+  );
   let claimed = false;
   pi.events.emit("pi-kit:claim:jobs", () => {
     claimed = true;

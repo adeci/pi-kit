@@ -34,6 +34,17 @@ rustPlatform.buildRustPackage {
     cp ${../ui}/*.ts $out/share/pi-kit/ui/
     cp extension/*.ts $out/share/pi-kit/jobs/extension/
     rm -f $out/share/pi-kit/jobs/extension/*.test.ts
+    # Pi loads the entry file through the profile symlink, so a static import
+    # that escapes the extension directory resolves against the symlink's
+    # directory, not the store — and fails only when Pi loads the extension.
+    # Shared modules must be resolved from the real path at runtime instead
+    # (see the ../../ui/style.ts import in index.ts). The loop below cannot
+    # catch this: it validates the installed layout, where the import does
+    # resolve.
+    if grep -qE 'from "\.\./' $out/share/pi-kit/jobs/extension/index.ts; then
+      echo "index.ts: static import escapes the extension directory; resolve it from realpathSync(import.meta.url)" >&2
+      exit 1
+    fi
     # Tests run from the source tree, so a module missing from the install
     # would only fail when Pi loads the extension. Resolve every relative
     # import against the installed files instead.

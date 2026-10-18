@@ -7,9 +7,9 @@ mock.module("@earendil-works/pi-tui", () => ({
 const { default: jobs, interval, jobGuidance } = await import("./index");
 import { formatJob, jobEvent } from "./watcher";
 
-test("loaded jobs extension supplies guidance even when skills are disabled", () => {
+test("loaded jobs extension supplies guidance even when skills are disabled", async () => {
   const handlers = new Map<string, Function>();
-  jobs({
+  await jobs({
     events: {
       emit() {},
       on() {
@@ -31,7 +31,7 @@ test("loaded jobs extension supplies guidance even when skills are disabled", ()
 
 test("foreground bash is guarded through tool_call", async () => {
   const handlers = new Map<string, Function>();
-  jobs({
+  await jobs({
     events: {
       emit() {},
       on() {
